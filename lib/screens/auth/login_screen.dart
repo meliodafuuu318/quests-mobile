@@ -69,7 +69,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       child: const Icon(Icons.shield_outlined, color: AppTheme.gold, size: 22),
                     ),
                     const SizedBox(width: 12),
-                    Text('QUESTIFY', style: AppTheme.mono(color: AppTheme.textPrimary, size: 22)),
+                    Text('QUESTS', style: AppTheme.mono(color: AppTheme.textPrimary, size: 22)),
                   ],
                 ),
                 const SizedBox(height: 60),
