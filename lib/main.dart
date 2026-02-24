@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'services/auth_provider.dart';
 import 'theme/app_theme.dart';
@@ -8,10 +7,6 @@ import 'screens/app_shell.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
-    statusBarColor: Colors.transparent,
-    statusBarIconBrightness: Brightness.light,
-  ));
   runApp(const QuestApp());
 }
 
@@ -23,25 +18,22 @@ class QuestApp extends StatelessWidget {
     return ChangeNotifierProvider(
       create: (_) => AuthProvider(),
       child: MaterialApp(
-        title: 'Questify',
+        title: 'Quests',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.theme,
-        home: const _RootRouter(),
+        home: const _Splash(),
       ),
     );
   }
 }
 
-class _RootRouter extends StatefulWidget {
-  const _RootRouter();
-
+class _Splash extends StatefulWidget {
+  const _Splash();
   @override
-  State<_RootRouter> createState() => _RootRouterState();
+  State<_Splash> createState() => _SplashState();
 }
 
-class _RootRouterState extends State<_RootRouter> {
-  bool _initialized = false;
-
+class _SplashState extends State<_Splash> {
   @override
   void initState() {
     super.initState();
@@ -49,53 +41,59 @@ class _RootRouterState extends State<_RootRouter> {
   }
 
   Future<void> _init() async {
+    // Small delay so the widget tree is fully built first
+    await Future.delayed(const Duration(milliseconds: 300));
+    if (!mounted) return;
     try {
       await context.read<AuthProvider>().init();
     } catch (_) {}
-    if (mounted) setState(() => _initialized = true);
+    if (!mounted) return;
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(builder: (_) {
+        final auth = context.read<AuthProvider>();
+        return auth.isLoggedIn ? const AppShell() : const LoginScreen();
+      }),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    if (!_initialized) {
-      return const Scaffold(
-        backgroundColor: AppTheme.bg,
-        body: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.shield_outlined, color: AppTheme.gold, size: 48),
-              SizedBox(height: 16),
-              Text(
-                'QUESTIFY',
-                style: TextStyle(
-                  color: AppTheme.gold,
-                  fontSize: 20,
-                  fontWeight: FontWeight.w700,
-                  fontFamily: 'monospace',
-                  letterSpacing: 3,
-                ),
+    return const Scaffold(
+      backgroundColor: AppTheme.bg,
+      body: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.shield_outlined, color: AppTheme.gold, size: 56),
+            SizedBox(height: 20),
+            Text(
+              'QUESTS',
+              style: TextStyle(
+                color: AppTheme.gold,
+                fontSize: 24,
+                fontWeight: FontWeight.w900,
+                fontFamily: 'monospace',
+                letterSpacing: 4,
               ),
-              SizedBox(height: 24),
-              SizedBox(
-                width: 24,
-                height: 24,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: AppTheme.gold,
-                ),
+            ),
+            SizedBox(height: 8),
+            Text(
+              'Loading...',
+              style: TextStyle(
+                color: AppTheme.textMuted,
+                fontSize: 12,
+                fontFamily: 'monospace',
               ),
-            ],
-          ),
+            ),
+            SizedBox(height: 32),
+            SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.gold),
+            ),
+          ],
         ),
-      );
-    }
-
-    return Consumer<AuthProvider>(
-      builder: (_, auth, __) {
-        if (auth.isLoggedIn) return const AppShell();
-        return const LoginScreen();
-      },
+      ),
     );
   }
 }

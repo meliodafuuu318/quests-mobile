@@ -66,7 +66,16 @@ class _NavItem extends StatelessWidget {
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           Icon(active ? activeIcon : icon, color: active ? AppTheme.gold : AppTheme.textMuted, size: 22),
           const SizedBox(height: 3),
-          Text(label, style: TextStyle(color: active ? AppTheme.gold : AppTheme.textMuted, fontSize: 9, fontWeight: FontWeight.w700, fontFamily: 'monospace', letterSpacing: 0.5)),
+          Text(
+            label,
+            style: TextStyle(
+              color: active ? AppTheme.gold : AppTheme.textMuted,
+              fontSize: 9,
+              fontWeight: FontWeight.w700,
+              fontFamily: 'monospace',
+              letterSpacing: 0.5,
+            ),
+          ),
         ]),
       ),
     );
