@@ -5,7 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 class ApiService {
   // 10.0.2.2 = localhost from Android emulator
   // Change to your PC's local IP (e.g. 192.168.1.x) for physical device
-  static const String baseUrl = 'http://192.168.10.160:8000/api';
+  static const String baseUrl = 'http://10.54.172.9:8000/api';
 
   static String? _token;
 
@@ -89,6 +89,9 @@ class ApiService {
 
   static Future<Map<String, dynamic>> getPostComments(String postId) =>
       _safeGet('/post/comments?postId=$postId');
+
+  static Future<Map<String, dynamic>> getPostReacts(String postId) =>
+      _safeGet('/post/reacts?postId=$postId');
 
   static Future<Map<String, dynamic>> react(String likeTarget) =>
       _safePost('/react', {'type': 'like', 'likeTarget': likeTarget});

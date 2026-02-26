@@ -172,6 +172,7 @@ class _PostCardState extends State<_PostCard> {
     final createdAt = postData?['created_at'] ?? post['created_at'] ?? '';
     final quest = post['quest'] is Map ? post['quest'] : null;
     final commentsCount = _toInt(post['comments_count']);
+    final reactCount = _toInt(post['react_count']);
     final visibility = post['visibility'] ?? 'public';
 
     return GestureDetector(

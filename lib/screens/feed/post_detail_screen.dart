@@ -30,7 +30,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       final commentRes = await ApiService.getPostComments(widget.postId);
       setState(() {
         _post = postRes['error'] == false ? postRes['results'] : null;
-        _comments = commentRes['error'] == false ? (commentRes['results']['data'] ?? commentRes['results'] ?? []) : [];
+        _comments = commentRes['error'] == false ? (commentRes['results'] ?? commentRes['results'] ?? []) : [];
         _loading = false;
       });
     } catch (_) { setState(() => _loading = false); }
