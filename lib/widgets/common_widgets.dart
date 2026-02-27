@@ -276,6 +276,51 @@ class _ShimmerBoxState extends State<ShimmerBox> with SingleTickerProviderStateM
   }
 }
 
+// ─── NOTIFICATION BELL ───────────────────────────────────────────────────────
+
+class NotificationBell extends StatelessWidget {
+  final int count;
+  final VoidCallback? onTap;
+  const NotificationBell({super.key, this.count = 0, this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Icon(
+              count > 0 ? Icons.notifications : Icons.notifications_outlined,
+              color: count > 0 ? AppTheme.gold : AppTheme.textSecondary,
+              size: 22,
+            ),
+            if (count > 0)
+              Positioned(
+                top: -4, right: -4,
+                child: Container(
+                  padding: const EdgeInsets.all(3),
+                  decoration: const BoxDecoration(color: AppTheme.rose, shape: BoxShape.circle),
+                  child: Text(
+                    count > 99 ? '99+' : '$count',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 8,
+                      fontWeight: FontWeight.w700,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 // ─── USER AVATAR ─────────────────────────────────────────────────────────────
 
 class UserAvatar extends StatelessWidget {

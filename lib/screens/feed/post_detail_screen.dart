@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import '../../services/api_service.dart';
+import '../../services/pusher_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common_widgets.dart';
+import '../../widgets/media_picker.dart';
 
 class PostDetailScreen extends StatefulWidget {
   final String postId;
@@ -13,46 +16,165 @@ class PostDetailScreen extends StatefulWidget {
 
 class _PostDetailScreenState extends State<PostDetailScreen> {
   Map<String, dynamic>? _post;
-  List<dynamic> _comments = [];
-  bool _loading = true;
-  final _commentCtrl = TextEditingController();
-  bool _submitting = false;
+  final List<Map<String, dynamic>> _comments = [];
+  bool   _loading    = true;
+  int    _likeCount  = 0;
+  bool   _liked      = false;   // ← persisted from API
+  bool   _submitting = false;
+
+  final _commentCtrl  = TextEditingController();
+  final _picker       = ImagePicker();
+  final List<MediaFile> _commentMedia = [];
 
   @override
-  void initState() { super.initState(); _load(); }
+  void initState() {
+    super.initState();
+    _load();
+    PusherService.instance.watchPost(widget.postId);
+    PusherService.instance.onComment(widget.postId, _onNewComment);
+    PusherService.instance.onReact(widget.postId, _onNewReact);
+  }
 
   @override
-  void dispose() { _commentCtrl.dispose(); super.dispose(); }
+  void dispose() {
+    _commentCtrl.dispose();
+    PusherService.instance.unwatchPost(widget.postId);
+    super.dispose();
+  }
+
+  // ── Pusher callbacks ─────────────────────────────────────────────────────
+
+  void _onNewComment() => _loadComments();
+
+  void _onNewReact(String postId, int count) {
+    if (mounted) setState(() => _likeCount = count);
+  }
+
+  // ── Load ─────────────────────────────────────────────────────────────────
 
   Future<void> _load() async {
     try {
       final postRes = await ApiService.getPost(widget.postId);
-      final commentRes = await ApiService.getPostComments(widget.postId);
-      setState(() {
-        _post = postRes['error'] == false ? postRes['results'] : null;
-        _comments = commentRes['error'] == false ? (commentRes['results'] ?? commentRes['results'] ?? []) : [];
-        _loading = false;
-      });
-    } catch (_) { setState(() => _loading = false); }
+      if (postRes['error'] == false) {
+        final r = postRes['results'] as Map<String, dynamic>;
+        _post      = r;
+        _likeCount = _toInt(r['likes_count']);
+        _liked     = r['liked'] == true;  // ← server tells us if user liked it
+      }
+      await _loadComments();
+    } catch (_) {}
+    if (mounted) setState(() => _loading = false);
   }
 
-  Future<void> _comment() async {
-    if (_commentCtrl.text.trim().isEmpty) return;
+  Future<void> _loadComments() async {
+    try {
+      final res = await ApiService.getPostComments(widget.postId);
+      if (res['error'] == false && mounted) {
+        final raw  = res['results'];
+        final list = (raw is Map ? raw['data'] : raw) as List? ?? [];
+        setState(() {
+          _comments.clear();
+          _comments.addAll(list.cast<Map<String, dynamic>>());
+        });
+      }
+    } catch (_) {}
+  }
+
+  // ── Like toggle ───────────────────────────────────────────────────────────
+
+  Future<void> _toggleLike() async {
+    // Optimistic update
+    setState(() {
+      _liked     = !_liked;
+      _likeCount += _liked ? 1 : -1;
+    });
+    try {
+      final res = await ApiService.react(widget.postId);
+      // Reconcile with server truth
+      if (res['error'] == false && mounted) {
+        final r = res['results'] as Map<String, dynamic>? ?? {};
+        setState(() {
+          _likeCount = _toInt(r['likes_count'] ?? _likeCount);
+          _liked     = r['liked'] == true;
+        });
+      }
+    } catch (_) {
+      // Revert on failure
+      if (mounted) setState(() {
+        _liked     = !_liked;
+        _likeCount += _liked ? 1 : -1;
+      });
+    }
+  }
+
+  // ── Comment media ─────────────────────────────────────────────────────────
+
+  Future<void> _pickCommentImage() async {
+    if (_commentMedia.length >= 2) return;
+    final res = await _picker.pickMultiImage(limit: 2 - _commentMedia.length);
+    if (res.isNotEmpty) {
+      setState(() {
+        for (final f in res) {
+          if (_commentMedia.length < 2) _commentMedia.add(MediaFile(file: f, isVideo: false));
+        }
+      });
+    }
+  }
+
+  Future<void> _pickCommentVideo() async {
+    if (_commentMedia.isNotEmpty) return; // 1 video max for comments
+    final f = await _picker.pickVideo(source: ImageSource.gallery);
+    if (f != null) setState(() => _commentMedia.add(MediaFile(file: f, isVideo: true)));
+  }
+
+  // ── Submit comment ────────────────────────────────────────────────────────
+
+  Future<void> _submitComment() async {
+    final text = _commentCtrl.text.trim();
+    if (text.isEmpty && _commentMedia.isEmpty) return;
     setState(() => _submitting = true);
     try {
-      await ApiService.createComment(commentTarget: widget.postId, content: _commentCtrl.text.trim());
+      await ApiService.createComment(
+        target:     widget.postId,
+        content:    text,
+        mediaFiles: _commentMedia.map((m) => m.file).toList(),
+      );
       _commentCtrl.clear();
-      _load();
+      setState(() => _commentMedia.clear());
+      await _loadComments();
     } catch (_) {}
-    setState(() => _submitting = false);
+    if (mounted) setState(() => _submitting = false);
   }
+
+  int _toInt(dynamic v) {
+    if (v == null) return 0;
+    if (v is int) return v;
+    if (v is double) return v.toInt();
+    return int.tryParse(v.toString()) ?? 0;
+  }
+
+  // ── Build ─────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('POST'),
-        leading: IconButton(icon: const Icon(Icons.arrow_back_ios_new, size: 18), onPressed: () => Navigator.pop(context)),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_new, size: 18),
+          onPressed: () => Navigator.pop(context),
+        ),
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 16),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Container(width: 7, height: 7,
+                decoration: const BoxDecoration(color: AppTheme.cyan, shape: BoxShape.circle)),
+              const SizedBox(width: 5),
+              Text('LIVE', style: AppTheme.mono(color: AppTheme.cyan, size: 10)),
+            ]),
+          ),
+        ],
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator(color: AppTheme.gold))
@@ -63,20 +185,14 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                     child: ListView(
                       padding: const EdgeInsets.all(20),
                       children: [
-                        Row(children: [
-                          UserAvatar(username: _post!['creator_username'] ?? 'u'),
-                          const SizedBox(width: 10),
-                          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                            Text(_post!['creator_full_name'] ?? '', style: AppTheme.label(color: AppTheme.textPrimary, size: 14, weight: FontWeight.w600)),
-                            Text('@${_post!['creator_username'] ?? ''}', style: AppTheme.label(color: AppTheme.textMuted, size: 12)),
-                          ]),
-                        ]),
-                        const SizedBox(height: 16),
-                        if (_post!['post']?['title'] != null)
-                          Text(_post!['post']['title'], style: AppTheme.label(color: AppTheme.textPrimary, size: 20, weight: FontWeight.w700)),
-                        const SizedBox(height: 8),
-                        if (_post!['post']?['content'] != null)
-                          Text(_post!['post']['content'], style: AppTheme.label(color: AppTheme.textSecondary, size: 14)),
+                        _buildPostHeader(),
+                        const SizedBox(height: 14),
+                        _buildPostBody(),
+                        // ── Post media ───────────────────────────────────────
+                        if ((_post!['media'] as List?)?.isNotEmpty == true) ...[
+                          const SizedBox(height: 12),
+                          MediaGallery(media: _post!['media'] as List),
+                        ],
                         if (_post!['quest'] != null) ...[
                           const SizedBox(height: 20),
                           QuestCard(quest: _post!['quest']),
@@ -102,46 +218,154 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                             ),
                           ),
                         ],
-                        const SizedBox(height: 28),
+                        const SizedBox(height: 24),
+                        // ── Like row ──────────────────────────────────────────
+                        Row(children: [
+                          GestureDetector(
+                            onTap: _toggleLike,
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 200),
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                              decoration: BoxDecoration(
+                                color: _liked ? AppTheme.roseDim : Colors.transparent,
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                  color: _liked ? AppTheme.rose.withOpacity(0.4) : AppTheme.border,
+                                ),
+                              ),
+                              child: Row(children: [
+                                Icon(
+                                  _liked ? Icons.favorite : Icons.favorite_border,
+                                  color: _liked ? AppTheme.rose : AppTheme.textMuted,
+                                  size: 18,
+                                ),
+                                const SizedBox(width: 6),
+                                Text('$_likeCount', style: AppTheme.label(
+                                  color: _liked ? AppTheme.rose : AppTheme.textMuted,
+                                  size: 14, weight: FontWeight.w600,
+                                )),
+                              ]),
+                            ),
+                          ),
+                        ]),
+                        const SizedBox(height: 24),
                         SectionHeader(title: 'Comments (${_comments.length})'),
-                        const SizedBox(height: 16),
+                        const SizedBox(height: 14),
                         if (_comments.isEmpty)
-                          Text('No comments yet.', style: AppTheme.label(color: AppTheme.textMuted, size: 13))
+                          Text('No comments yet. Be first!',
+                              style: AppTheme.label(color: AppTheme.textMuted, size: 13))
                         else
                           ..._comments.map((c) => _CommentTile(comment: c)),
+                        const SizedBox(height: 20),
                       ],
                     ),
                   ),
+                  // ── Comment input bar ──────────────────────────────────────
                   Container(
-                    decoration: const BoxDecoration(color: AppTheme.surface, border: Border(top: BorderSide(color: AppTheme.border))),
-                    padding: EdgeInsets.fromLTRB(16, 12, 16, MediaQuery.of(context).viewInsets.bottom + 16),
-                    child: Row(children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _commentCtrl,
-                          decoration: const InputDecoration(hintText: 'Write a comment...', contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 10)),
-                          style: AppTheme.label(color: AppTheme.textPrimary, size: 13),
-                          textInputAction: TextInputAction.send,
-                          onSubmitted: (_) => _comment(),
+                    decoration: const BoxDecoration(
+                      color: AppTheme.surface,
+                      border: Border(top: BorderSide(color: AppTheme.border)),
+                    ),
+                    padding: EdgeInsets.fromLTRB(
+                      12, 8, 12, MediaQuery.of(context).viewInsets.bottom + 12,
+                    ),
+                    child: Column(mainAxisSize: MainAxisSize.min, children: [
+                      // Comment media preview
+                      if (_commentMedia.isNotEmpty) ...[
+                        MediaPickerBar.buildPreview(_commentMedia, (i) {
+                          setState(() => _commentMedia.removeAt(i));
+                        }),
+                        const SizedBox(height: 8),
+                      ],
+                      Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                        // Media buttons
+                        _CommentMediaBtn(
+                          icon: Icons.image_outlined,
+                          color: AppTheme.cyan,
+                          enabled: _commentMedia.length < 2,
+                          onTap: _pickCommentImage,
                         ),
-                      ),
-                      const SizedBox(width: 10),
-                      GestureDetector(
-                        onTap: _comment,
-                        child: Container(
-                          width: 40, height: 40,
-                          decoration: BoxDecoration(color: AppTheme.gold, borderRadius: BorderRadius.circular(8)),
-                          child: _submitting
-                              ? const Padding(padding: EdgeInsets.all(10), child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
-                              : const Icon(Icons.send_rounded, color: Colors.black, size: 18),
+                        const SizedBox(width: 4),
+                        _CommentMediaBtn(
+                          icon: Icons.videocam_outlined,
+                          color: AppTheme.violet,
+                          enabled: _commentMedia.isEmpty,
+                          onTap: _pickCommentVideo,
                         ),
-                      ),
+                        const SizedBox(width: 8),
+                        // Text field
+                        Expanded(
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxHeight: 120),
+                            child: TextField(
+                              controller: _commentCtrl,
+                              decoration: const InputDecoration(
+                                hintText: 'Write a comment...',
+                                contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                              ),
+                              style: AppTheme.label(color: AppTheme.textPrimary, size: 13),
+                              textInputAction: TextInputAction.newline,
+                              keyboardType: TextInputType.multiline,
+                              maxLines: null,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        // Send button
+                        GestureDetector(
+                          onTap: _submitComment,
+                          child: Container(
+                            width: 40, height: 40,
+                            decoration: BoxDecoration(color: AppTheme.gold, borderRadius: BorderRadius.circular(10)),
+                            child: _submitting
+                                ? const Padding(padding: EdgeInsets.all(10),
+                                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
+                                : const Icon(Icons.send_rounded, color: Colors.black, size: 18),
+                          ),
+                        ),
+                      ]),
                     ]),
                   ),
                 ]),
     );
   }
+
+  Widget _buildPostHeader() {
+    final username  = _post!['creator_username']?.toString() ?? '';
+    final fullName  = _post!['creator_full_name']?.toString() ?? '';
+    final createdAt = _post!['post']?['created_at']?.toString() ?? '';
+    return Row(children: [
+      UserAvatar(username: username, size: 44),
+      const SizedBox(width: 12),
+      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(fullName.isNotEmpty ? fullName : username,
+            style: AppTheme.label(color: AppTheme.textPrimary, size: 15, weight: FontWeight.w700)),
+        Row(children: [
+          Text('@$username', style: AppTheme.label(color: AppTheme.textMuted, size: 12)),
+          if (createdAt.isNotEmpty) ...[
+            Text('  ·  ', style: AppTheme.label(color: AppTheme.textMuted, size: 12)),
+            Text(createdAt, style: AppTheme.label(color: AppTheme.textMuted, size: 12)),
+          ],
+        ]),
+      ])),
+    ]);
+  }
+
+  Widget _buildPostBody() {
+    final title   = _post!['post']?['title']?.toString() ?? '';
+    final content = _post!['post']?['content']?.toString() ?? '';
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      if (title.isNotEmpty)
+        Text(title, style: AppTheme.label(color: AppTheme.textPrimary, size: 20, weight: FontWeight.w800)),
+      if (content.isNotEmpty) ...[
+        const SizedBox(height: 8),
+        Text(content, style: AppTheme.label(color: AppTheme.textSecondary, size: 14)),
+      ],
+    ]);
+  }
 }
+
+// ── Comment tile with media ────────────────────────────────────────────────────
 
 class _CommentTile extends StatelessWidget {
   final Map<String, dynamic> comment;
@@ -149,21 +373,70 @@ class _CommentTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final media = comment['media'] as List? ?? [];
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        UserAvatar(username: comment['username'] ?? 'u', size: 30),
+        UserAvatar(username: comment['username']?.toString() ?? 'u', size: 32),
         const SizedBox(width: 10),
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
-            Text(comment['username'] ?? '', style: AppTheme.label(color: AppTheme.textPrimary, size: 13, weight: FontWeight.w600)),
+            Text(comment['username']?.toString() ?? '',
+                style: AppTheme.label(color: AppTheme.textPrimary, size: 13, weight: FontWeight.w600)),
             const SizedBox(width: 8),
-            Text(comment['createdAt'] ?? '', style: AppTheme.label(color: AppTheme.textMuted, size: 11)),
+            Text(comment['createdAt']?.toString() ?? '',
+                style: AppTheme.label(color: AppTheme.textMuted, size: 11)),
           ]),
           const SizedBox(height: 4),
-          Text(comment['content'] ?? '', style: AppTheme.label(color: AppTheme.textSecondary, size: 13)),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: AppTheme.surfaceElevated,
+              borderRadius: const BorderRadius.only(
+                topRight: Radius.circular(10),
+                bottomLeft: Radius.circular(10),
+                bottomRight: Radius.circular(10),
+              ),
+              border: Border.all(color: AppTheme.border),
+            ),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              if ((comment['content'] ?? '').toString().isNotEmpty)
+                Text(comment['content'].toString(),
+                    style: AppTheme.label(color: AppTheme.textSecondary, size: 13)),
+              if (media.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                MediaGallery(media: media),
+              ],
+            ]),
+          ),
         ])),
       ]),
+    );
+  }
+}
+
+class _CommentMediaBtn extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+  final bool enabled;
+  final VoidCallback onTap;
+  const _CommentMediaBtn({required this.icon, required this.color, required this.enabled, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: enabled ? onTap : null,
+      child: Container(
+        width: 36, height: 36,
+        decoration: BoxDecoration(
+          color: enabled ? color.withOpacity(0.1) : AppTheme.surfaceElevated,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: enabled ? color.withOpacity(0.3) : AppTheme.border),
+        ),
+        alignment: Alignment.center,
+        child: Icon(icon, color: enabled ? color : AppTheme.textMuted, size: 16),
+      ),
     );
   }
 }

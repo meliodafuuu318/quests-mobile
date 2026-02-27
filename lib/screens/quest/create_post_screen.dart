@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import '../../services/api_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common_widgets.dart';
+import '../../widgets/media_picker.dart';
 
 class CreatePostScreen extends StatefulWidget {
   const CreatePostScreen({super.key});
@@ -11,76 +13,111 @@ class CreatePostScreen extends StatefulWidget {
 }
 
 class _CreatePostScreenState extends State<CreatePostScreen> {
-  final _titleCtrl = TextEditingController();
-  final _contentCtrl = TextEditingController();
+  final _titleCtrl     = TextEditingController();
+  final _contentCtrl   = TextEditingController();
   final _rewardExpCtrl = TextEditingController(text: '100');
   final _rewardPtsCtrl = TextEditingController(text: '10');
+  final _picker        = ImagePicker();
+
   String _visibility = 'public';
-  bool _submitting = false;
-  final List<Map<String, dynamic>> _tasks = [];
+  bool   _submitting  = false;
+  final List<Map<String, dynamic>> _tasks      = [];
+  final List<MediaFile>            _mediaFiles = [];
 
   @override
   void dispose() {
     for (final c in [_titleCtrl, _contentCtrl, _rewardExpCtrl, _rewardPtsCtrl]) c.dispose();
     for (final t in _tasks) {
       (t['titleCtrl'] as TextEditingController).dispose();
-      (t['descCtrl'] as TextEditingController).dispose();
+      (t['descCtrl']  as TextEditingController).dispose();
     }
     super.dispose();
   }
 
-  void _addTask() {
-    setState(() => _tasks.add({
-      'title': '', 'description': '', 'rewardExp': 10, 'rewardPoints': 1,
-      'order': _tasks.length + 1,
-      'titleCtrl': TextEditingController(),
-      'descCtrl': TextEditingController(),
-    }));
+  // ── Media picking ──────────────────────────────────────────────────────────
+
+  Future<void> _pickImage() async {
+    if (_mediaFiles.length >= 4) return;
+    final res = await _picker.pickMultiImage(limit: 4 - _mediaFiles.length);
+    if (res.isNotEmpty) {
+      setState(() {
+        for (final f in res) {
+          if (_mediaFiles.length < 4) _mediaFiles.add(MediaFile(file: f, isVideo: false));
+        }
+      });
+    }
   }
+
+  Future<void> _pickVideo() async {
+    if (_mediaFiles.length >= 4) return;
+    final f = await _picker.pickVideo(source: ImageSource.gallery);
+    if (f != null) setState(() => _mediaFiles.add(MediaFile(file: f, isVideo: true)));
+  }
+
+  void _removeMedia(int i) => setState(() => _mediaFiles.removeAt(i));
+
+  // ── Tasks ─────────────────────────────────────────────────────────────────
+
+  void _addTask() => setState(() => _tasks.add({
+    'title': '', 'description': '', 'rewardExp': 10, 'rewardPoints': 1,
+    'order': _tasks.length + 1,
+    'titleCtrl': TextEditingController(),
+    'descCtrl':  TextEditingController(),
+  }));
 
   void _removeTask(int i) {
     (_tasks[i]['titleCtrl'] as TextEditingController).dispose();
-    (_tasks[i]['descCtrl'] as TextEditingController).dispose();
+    (_tasks[i]['descCtrl']  as TextEditingController).dispose();
     setState(() {
       _tasks.removeAt(i);
       for (int j = 0; j < _tasks.length; j++) _tasks[j]['order'] = j + 1;
     });
   }
 
+  // ── Submit ────────────────────────────────────────────────────────────────
+
   Future<void> _submit() async {
     if (_titleCtrl.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Title is required'), backgroundColor: AppTheme.rose));
-      return;
+      _snack('Title is required', AppTheme.rose); return;
     }
     if (_tasks.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Add at least one quest task'), backgroundColor: AppTheme.rose));
-      return;
+      _snack('Add at least one quest task', AppTheme.rose); return;
     }
     setState(() => _submitting = true);
     try {
       final res = await ApiService.createPost(
-        title: _titleCtrl.text.trim(),
-        content: _contentCtrl.text.trim(),
-        visibility: _visibility,
-        rewardExp: int.tryParse(_rewardExpCtrl.text) ?? 100,
+        title:        _titleCtrl.text.trim(),
+        content:      _contentCtrl.text.trim(),
+        visibility:   _visibility,
+        rewardExp:    int.tryParse(_rewardExpCtrl.text) ?? 100,
         rewardPoints: int.tryParse(_rewardPtsCtrl.text) ?? 10,
         tasks: _tasks.map((t) => {
-          'title': (t['titleCtrl'] as TextEditingController).text.trim(),
-          'description': (t['descCtrl'] as TextEditingController).text.trim(),
-          'rewardExp': t['rewardExp'], 'rewardPoints': t['rewardPoints'], 'order': t['order'],
+          'title':        (t['titleCtrl'] as TextEditingController).text.trim(),
+          'description':  (t['descCtrl']  as TextEditingController).text.trim(),
+          'rewardExp':    t['rewardExp'],
+          'rewardPoints': t['rewardPoints'],
+          'order':        t['order'],
         }).toList(),
+        mediaFiles: _mediaFiles.map((m) => m.file).toList(),
       );
       if (!mounted) return;
       if (res['error'] == false) {
         Navigator.pop(context, true);
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res['message'] ?? 'Failed'), backgroundColor: AppTheme.rose));
+        _snack(res['message'] ?? 'Failed', AppTheme.rose);
       }
-    } catch (_) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Connection error'), backgroundColor: AppTheme.rose));
+    } catch (e) {
+      if (mounted) _snack('Connection error', AppTheme.rose);
     }
     if (mounted) setState(() => _submitting = false);
   }
+
+  void _snack(String msg, Color color) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+    content: Text(msg),
+    backgroundColor: color,
+    behavior: SnackBarBehavior.floating,
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+  ));
 
   @override
   Widget build(BuildContext context) {
@@ -114,33 +151,49 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
             style: AppTheme.label(color: AppTheme.textPrimary, size: 14),
           ),
           const SizedBox(height: 14),
-          // Visibility
+
+          // ── Media attachments ────────────────────────────────────────────
+          if (_mediaFiles.isNotEmpty) ...[
+            MediaPickerBar.buildPreview(_mediaFiles, _removeMedia),
+            const SizedBox(height: 10),
+          ],
+          MediaPickerBar(
+            files: _mediaFiles,
+            onPickImage: _pickImage,
+            onPickVideo: _pickVideo,
+            onRemove: _removeMedia,
+          ),
+          const SizedBox(height: 16),
+
+          // ── Visibility ────────────────────────────────────────────────────
           Row(children: [
             Text('Visibility:', style: AppTheme.label(color: AppTheme.textSecondary, size: 13)),
             const SizedBox(width: 12),
-            ...([('public', Icons.public), ('friends', Icons.people_outline), ('private', Icons.lock_outline)].map((v) =>
-              Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: GestureDetector(
-                  onTap: () => setState(() => _visibility = v.$1),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: _visibility == v.$1 ? AppTheme.goldDim : AppTheme.surfaceElevated,
-                      borderRadius: BorderRadius.circular(6),
-                      border: Border.all(color: _visibility == v.$1 ? AppTheme.gold : AppTheme.border),
+            ...[('public', Icons.public), ('friends', Icons.people_outline), ('private', Icons.lock_outline)]
+                .map((v) => Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: GestureDetector(
+                    onTap: () => setState(() => _visibility = v.$1),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color:  _visibility == v.$1 ? AppTheme.goldDim : AppTheme.surfaceElevated,
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: _visibility == v.$1 ? AppTheme.gold : AppTheme.border),
+                      ),
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [
+                        Icon(v.$2, size: 13, color: _visibility == v.$1 ? AppTheme.gold : AppTheme.textMuted),
+                        const SizedBox(width: 4),
+                        Text(v.$1, style: AppTheme.label(
+                          color: _visibility == v.$1 ? AppTheme.gold : AppTheme.textMuted, size: 12)),
+                      ]),
                     ),
-                    child: Row(mainAxisSize: MainAxisSize.min, children: [
-                      Icon(v.$2, size: 13, color: _visibility == v.$1 ? AppTheme.gold : AppTheme.textMuted),
-                      const SizedBox(width: 4),
-                      Text(v.$1, style: AppTheme.label(color: _visibility == v.$1 ? AppTheme.gold : AppTheme.textMuted, size: 12)),
-                    ]),
                   ),
-                ),
-              )
-            )),
+                )),
           ]),
           const SizedBox(height: 28),
+
+          // ── Quest Rewards ─────────────────────────────────────────────────
           SectionHeader(title: 'Quest Rewards'),
           const SizedBox(height: 16),
           Row(children: [
@@ -167,6 +220,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
             ])),
           ]),
           const SizedBox(height: 28),
+
+          // ── Quest Tasks ───────────────────────────────────────────────────
           SectionHeader(
             title: 'Quest Tasks',
             trailing: GestureDetector(
@@ -205,6 +260,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     );
   }
 }
+
+// ── Task Editor (unchanged from original) ─────────────────────────────────────
 
 class _TaskEditor extends StatelessWidget {
   final int index;
@@ -269,11 +326,8 @@ class _TaskEditor extends StatelessWidget {
 }
 
 class _Counter extends StatelessWidget {
-  final String label;
-  final int value;
-  final Color color;
-  final VoidCallback onDec;
-  final VoidCallback onInc;
+  final String label; final int value; final Color color;
+  final VoidCallback onDec; final VoidCallback onInc;
   const _Counter({required this.label, required this.value, required this.color, required this.onDec, required this.onInc});
 
   @override

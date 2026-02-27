@@ -1,11 +1,11 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:http/http.dart' as http;
+import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class ApiService {
-  // 10.0.2.2 = localhost from Android emulator
-  // Change to your PC's local IP (e.g. 192.168.1.x) for physical device
-  static const String baseUrl = 'http://10.54.172.9:8000/api';
+  static const String baseUrl = 'http://10.54.172.44:8000/api';
 
   static String? _token;
 
@@ -26,117 +26,193 @@ class ApiService {
     await prefs.remove('auth_token');
   }
 
-  static bool get isLoggedIn => _token != null && _token!.isNotEmpty;
+  static bool    get isLoggedIn => _token != null && _token!.isNotEmpty;
+  static String? get token      => _token;
 
-  static Map<String, String> get _headers => {
+  static Map<String, String> get _jsonHeaders => {
     'Content-Type': 'application/json',
+    'Accept':       'application/json',
+    if (_token != null) 'Authorization': 'Bearer $_token',
+  };
+
+  static Map<String, String> get _authHeaders => {
     'Accept': 'application/json',
     if (_token != null) 'Authorization': 'Bearer $_token',
   };
 
-  static Future<Map<String, dynamic>> _safePost(String path, Map<String, dynamic> body) async {
-    final res = await http.post(Uri.parse('$baseUrl$path'), headers: _headers, body: jsonEncode(body));
+  // ── Internal helpers ──────────────────────────────────────────────────────
+
+  static Future<Map<String, dynamic>> _post(String p, Map<String, dynamic> b) async {
+    final r = await http.post(Uri.parse('$baseUrl$p'), headers: _jsonHeaders, body: jsonEncode(b));
+    return jsonDecode(r.body) as Map<String, dynamic>;
+  }
+
+  static Future<Map<String, dynamic>> _get(String p) async {
+    final r = await http.get(Uri.parse('$baseUrl$p'), headers: _jsonHeaders);
+    return jsonDecode(r.body) as Map<String, dynamic>;
+  }
+
+  static Future<Map<String, dynamic>> _put(String p, Map<String, dynamic> b) async {
+    final r = await http.put(Uri.parse('$baseUrl$p'), headers: _jsonHeaders, body: jsonEncode(b));
+    return jsonDecode(r.body) as Map<String, dynamic>;
+  }
+
+  static Future<Map<String, dynamic>> _delete(String p, Map<String, dynamic> b) async {
+    final r = await http.delete(Uri.parse('$baseUrl$p'), headers: _jsonHeaders, body: jsonEncode(b));
+    return jsonDecode(r.body) as Map<String, dynamic>;
+  }
+
+  /// Multipart POST — for endpoints that accept files alongside fields.
+  static Future<Map<String, dynamic>> _multipartPost(
+    String path,
+    Map<String, String> fields,
+    List<XFile> mediaFiles,
+  ) async {
+    final req = http.MultipartRequest('POST', Uri.parse('$baseUrl$path'));
+    req.headers.addAll(_authHeaders);
+    req.fields.addAll(fields);
+
+    for (int i = 0; i < mediaFiles.length; i++) {
+      final f    = mediaFiles[i];
+      final file = File(f.path);
+      final mime = f.mimeType ?? _guessMime(f.path);
+      req.files.add(await http.MultipartFile.fromPath(
+        'media[]',  // Laravel expects media[]
+        file.path,
+        contentType: _parseMediaType(mime),
+      ));
+    }
+
+    final streamed = await req.send();
+    final res      = await http.Response.fromStream(streamed);
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
-  static Future<Map<String, dynamic>> _safeGet(String path) async {
-    final res = await http.get(Uri.parse('$baseUrl$path'), headers: _headers);
-    return jsonDecode(res.body) as Map<String, dynamic>;
+  static String _guessMime(String path) {
+    final ext = path.split('.').last.toLowerCase();
+    if (['jpg', 'jpeg'].contains(ext)) return 'image/jpeg';
+    if (ext == 'png') return 'image/png';
+    if (ext == 'gif') return 'image/gif';
+    if (ext == 'webp') return 'image/webp';
+    if (ext == 'mp4') return 'video/mp4';
+    if (ext == 'mov') return 'video/quicktime';
+    return 'application/octet-stream';
   }
 
-  static Future<Map<String, dynamic>> _safePut(String path, Map<String, dynamic> body) async {
-    final res = await http.put(Uri.parse('$baseUrl$path'), headers: _headers, body: jsonEncode(body));
-    return jsonDecode(res.body) as Map<String, dynamic>;
+  static http.MediaType _parseMediaType(String mime) {
+    final parts = mime.split('/');
+    return http.MediaType(parts[0], parts.length > 1 ? parts[1] : 'octet-stream');
   }
 
-  static Future<Map<String, dynamic>> _safeDelete(String path, Map<String, dynamic> body) async {
-    final res = await http.delete(Uri.parse('$baseUrl$path'), headers: _headers, body: jsonEncode(body));
-    return jsonDecode(res.body) as Map<String, dynamic>;
-  }
-
-  // ─── AUTH ────────────────────────────────────────────────────────────────────
-
+  // ─── AUTH ────────────────────────────────────────────────────────────────
   static Future<Map<String, dynamic>> register({
     required String username, required String email, required String password,
-    required String firstName, required String lastName, String role = 'USER',
-  }) => _safePost('/auth/register', {
+    required String firstName, required String lastName,
+  }) => _post('/auth/register', {
     'username': username, 'email': email, 'password': password,
-    'firstName': firstName, 'lastName': lastName, 'role': role,
+    'firstName': firstName, 'lastName': lastName, 'role': 'USER',
   });
 
   static Future<Map<String, dynamic>> login({required String username, required String password}) =>
-      _safePost('/auth/login', {'username': username, 'password': password});
+      _post('/auth/login', {'username': username, 'password': password});
 
-  static Future<Map<String, dynamic>> logout() =>
-      _safePost('/auth/logout', {});
+  static Future<Map<String, dynamic>> logout() => _post('/auth/logout', {});
 
-  // ─── FEED ─────────────────────────────────────────────────────────────────────
+  // ─── FEED (page-based pagination) ────────────────────────────────────────
+  static Future<Map<String, dynamic>> getFeed({int page = 1, int perPage = 10}) =>
+      _get('/post?page=$page&per_page=$perPage');
 
-  static Future<Map<String, dynamic>> getFeed() => _safeGet('/post');
+  static Future<Map<String, dynamic>> getDiscoveryPosts({int page = 1, int perPage = 5}) =>
+      _get('/post?discovery=1&page=$page&per_page=$perPage');
 
-  static Future<Map<String, dynamic>> getPost(String postId) => _safeGet('/post/show?postId=$postId');
+  static Future<Map<String, dynamic>> getPost(String id) => _get('/post/show?postId=$id');
 
+  // Creates a post — sends as multipart when media files are attached
   static Future<Map<String, dynamic>> createPost({
-    required String title, required String content, required String visibility,
-    required int rewardExp, required int rewardPoints, required List<Map<String, dynamic>> tasks,
-  }) => _safePost('/post', {
-    'type': 'post', 'title': title, 'content': content, 'visibility': visibility,
-    'rewardExp': rewardExp, 'rewardPoints': rewardPoints, 'tasks': tasks,
-  });
+    required String title,
+    required String content,
+    required String visibility,
+    required int rewardExp,
+    required int rewardPoints,
+    required List<Map<String, dynamic>> tasks,
+    List<XFile> mediaFiles = const [],
+  }) async {
+    final fields = {
+      'type': 'post',
+      'title': title,
+      'content': content,
+      'visibility': visibility,
+      'rewardExp': rewardExp.toString(),
+      'rewardPoints': rewardPoints.toString(),
+    };
 
-  static Future<Map<String, dynamic>> deletePost(String postId) =>
-      _safeDelete('/post/delete', {'postId': postId});
+    // Serialize tasks as indexed form fields (Laravel array parsing)
+    for (int i = 0; i < tasks.length; i++) {
+      final t = tasks[i];
+      fields['tasks[$i][title]']        = t['title'].toString();
+      fields['tasks[$i][description]']  = t['description'].toString();
+      fields['tasks[$i][rewardExp]']    = t['rewardExp'].toString();
+      fields['tasks[$i][rewardPoints]'] = t['rewardPoints'].toString();
+      fields['tasks[$i][order]']        = t['order'].toString();
+    }
 
-  static Future<Map<String, dynamic>> getPostComments(String postId) =>
-      _safeGet('/post/comments?postId=$postId');
+    if (mediaFiles.isEmpty) {
+      // Pure JSON path (no media)
+      return _post('/post', {
+        'type': 'post', 'title': title, 'content': content,
+        'visibility': visibility, 'rewardExp': rewardExp, 'rewardPoints': rewardPoints,
+        'tasks': tasks,
+      });
+    }
 
-  static Future<Map<String, dynamic>> getPostReacts(String postId) =>
-      _safeGet('/post/reacts?postId=$postId');
+    return _multipartPost('/post', fields, mediaFiles);
+  }
 
+  static Future<Map<String, dynamic>> deletePost(String id) =>
+      _delete('/post/delete', {'postId': id});
+
+  static Future<Map<String, dynamic>> getPostComments(String id) =>
+      _get('/post/comments?postId=$id');
+
+  /// React returns {error, results: {likes_count, liked}}
   static Future<Map<String, dynamic>> react(String likeTarget) =>
-      _safePost('/react', {'type': 'like', 'likeTarget': likeTarget});
+      _post('/react', {'type': 'like', 'likeTarget': likeTarget});
 
-  // ─── COMMENTS ────────────────────────────────────────────────────────────────
+  // ─── COMMENTS ────────────────────────────────────────────────────────────
+  static Future<Map<String, dynamic>> createComment({
+    required String target,
+    required String content,
+    List<XFile> mediaFiles = const [],
+  }) {
+    if (mediaFiles.isEmpty) {
+      return _post('/comment/create', {
+        'type': 'comment',
+        'commentTarget': target,
+        'content': content,
+      });
+    }
+    return _multipartPost('/comment/create', {
+      'type': 'comment',
+      'commentTarget': target,
+      'content': content,
+    }, mediaFiles);
+  }
 
-  static Future<Map<String, dynamic>> createComment({required String commentTarget, required String content}) =>
-      _safePost('/comment/create', {'type': 'comment', 'commentTarget': commentTarget, 'content': content});
+  // ─── QUESTS ──────────────────────────────────────────────────────────────
+  static Future<Map<String, dynamic>> joinQuest(String code)     => _post('/quest/join',         {'questCode': code});
+  static Future<Map<String, dynamic>> completeQuest(String id)   => _post('/quest/complete',      {'questId': id});
+  static Future<Map<String, dynamic>> completeTask(String id)    => _post('/quest/task/complete', {'taskId': id});
 
-  // ─── QUESTS ──────────────────────────────────────────────────────────────────
+  // ─── USER ────────────────────────────────────────────────────────────────
+  static Future<Map<String, dynamic>> getAccountInfo()              => _get('/user/account-info');
+  static Future<Map<String, dynamic>> getUserPosts(String username) => _get('/user/posts?username=$username');
+  static Future<Map<String, dynamic>> showUser(String username)     => _get('/user/show?username=$username');
+  static Future<Map<String, dynamic>> searchUsers(String q)        => _get('/user/search?name=${Uri.encodeComponent(q)}');
+  static Future<Map<String, dynamic>> editAccountInfo(Map<String, dynamic> d) => _put('/user/account-info', d);
 
-  static Future<Map<String, dynamic>> joinQuest(String questCode) =>
-      _safePost('/quest/join', {'questCode': questCode});
-
-  static Future<Map<String, dynamic>> completeQuest(String questId) =>
-      _safePost('/quest/complete', {'questId': questId});
-
-  static Future<Map<String, dynamic>> completeTask(String taskId) =>
-      _safePost('/quest/task/complete', {'taskId': taskId});
-
-  // ─── USER ─────────────────────────────────────────────────────────────────────
-
-  static Future<Map<String, dynamic>> getAccountInfo() => _safeGet('/user/account-info');
-
-  static Future<Map<String, dynamic>> getUserPosts(String username) =>
-      _safeGet('/user/posts?username=$username');
-
-  static Future<Map<String, dynamic>> showUser(String username) =>
-      _safeGet('/user/show?username=$username');
-
-  static Future<Map<String, dynamic>> searchUsers(String name) =>
-      _safeGet('/user/search?name=${Uri.encodeComponent(name)}');
-
-  static Future<Map<String, dynamic>> editAccountInfo(Map<String, dynamic> data) =>
-      _safePut('/user/account-info', data);
-
-  // ─── FRIENDS ─────────────────────────────────────────────────────────────────
-
-  static Future<Map<String, dynamic>> getFriends() => _safeGet('/user/friend');
-
-  static Future<Map<String, dynamic>> getFriendRequests() => _safeGet('/user/friend/requests');
-
-  static Future<Map<String, dynamic>> sendFriendRequest(String username) =>
-      _safePost('/user/friend/send', {'username': username});
-
-  static Future<Map<String, dynamic>> acceptFriendRequest(String username) =>
-      _safePut('/user/friend/accept', {'username': username});
+  // ─── FRIENDS ─────────────────────────────────────────────────────────────
+  static Future<Map<String, dynamic>> getFriends()                  => _get('/user/friend');
+  static Future<Map<String, dynamic>> getFriendRequests()           => _get('/user/friend/requests');
+  static Future<Map<String, dynamic>> sendFriendRequest(String u)   => _post('/user/friend/send',  {'username': u});
+  static Future<Map<String, dynamic>> acceptFriendRequest(String u) => _put('/user/friend/accept', {'username': u});
 }
