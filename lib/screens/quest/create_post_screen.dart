@@ -166,31 +166,43 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           const SizedBox(height: 16),
 
           // ── Visibility ────────────────────────────────────────────────────
-          Row(children: [
-            Text('Visibility:', style: AppTheme.label(color: AppTheme.textSecondary, size: 13)),
-            const SizedBox(width: 12),
-            ...[('public', Icons.public), ('friends', Icons.people_outline), ('private', Icons.lock_outline)]
-                .map((v) => Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: GestureDetector(
+          // FIX #3: was a plain Row — buttons overflow on narrow screens.
+          // Wrap lets buttons flow to a second line instead of overflowing.
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Visibility:', style: AppTheme.label(color: AppTheme.textSecondary, size: 13)),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  ('public',  Icons.public,         'PUBLIC'),
+                  ('friends', Icons.people_outline, 'FRIENDS'),
+                  ('private', Icons.lock_outline,   'PRIVATE'),
+                ].map((v) {
+                  final selected = _visibility == v.$1;
+                  return GestureDetector(
                     onTap: () => setState(() => _visibility = v.$1),
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                       decoration: BoxDecoration(
-                        color:  _visibility == v.$1 ? AppTheme.goldDim : AppTheme.surfaceElevated,
+                        color:  selected ? AppTheme.goldDim : AppTheme.surfaceElevated,
                         borderRadius: BorderRadius.circular(6),
-                        border: Border.all(color: _visibility == v.$1 ? AppTheme.gold : AppTheme.border),
+                        border: Border.all(color: selected ? AppTheme.gold : AppTheme.border),
                       ),
                       child: Row(mainAxisSize: MainAxisSize.min, children: [
-                        Icon(v.$2, size: 13, color: _visibility == v.$1 ? AppTheme.gold : AppTheme.textMuted),
+                        Icon(v.$2, size: 13, color: selected ? AppTheme.gold : AppTheme.textMuted),
                         const SizedBox(width: 4),
-                        Text(v.$1, style: AppTheme.label(
-                          color: _visibility == v.$1 ? AppTheme.gold : AppTheme.textMuted, size: 12)),
+                        Text(v.$3, style: AppTheme.label(
+                          color: selected ? AppTheme.gold : AppTheme.textMuted, size: 12)),
                       ]),
                     ),
-                  ),
-                )),
-          ]),
+                  );
+                }).toList(),
+              ),
+            ],
+          ),
           const SizedBox(height: 28),
 
           // ── Quest Rewards ─────────────────────────────────────────────────
@@ -261,7 +273,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   }
 }
 
-// ── Task Editor (unchanged from original) ─────────────────────────────────────
+// ── Task Editor ────────────────────────────────────────────────────────────────
 
 class _TaskEditor extends StatelessWidget {
   final int index;

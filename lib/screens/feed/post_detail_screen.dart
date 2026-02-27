@@ -19,11 +19,11 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   final List<Map<String, dynamic>> _comments = [];
   bool   _loading    = true;
   int    _likeCount  = 0;
-  bool   _liked      = false;   // ← persisted from API
+  bool   _liked      = false;
   bool   _submitting = false;
 
-  final _commentCtrl  = TextEditingController();
-  final _picker       = ImagePicker();
+  final _commentCtrl    = TextEditingController();
+  final _picker         = ImagePicker();
   final List<MediaFile> _commentMedia = [];
 
   @override
@@ -42,15 +42,12 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     super.dispose();
   }
 
-  // ── Pusher callbacks ─────────────────────────────────────────────────────
-
   void _onNewComment() => _loadComments();
-
   void _onNewReact(String postId, int count) {
     if (mounted) setState(() => _likeCount = count);
   }
 
-  // ── Load ─────────────────────────────────────────────────────────────────
+  // ── Load ──────────────────────────────────────────────────────────────────
 
   Future<void> _load() async {
     try {
@@ -59,7 +56,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         final r = postRes['results'] as Map<String, dynamic>;
         _post      = r;
         _likeCount = _toInt(r['likes_count']);
-        _liked     = r['liked'] == true;  // ← server tells us if user liked it
+        _liked     = r['liked'] == true;
       }
       await _loadComments();
     } catch (_) {}
@@ -80,17 +77,12 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     } catch (_) {}
   }
 
-  // ── Like toggle ───────────────────────────────────────────────────────────
+  // ── Like ──────────────────────────────────────────────────────────────────
 
   Future<void> _toggleLike() async {
-    // Optimistic update
-    setState(() {
-      _liked     = !_liked;
-      _likeCount += _liked ? 1 : -1;
-    });
+    setState(() { _liked = !_liked; _likeCount += _liked ? 1 : -1; });
     try {
       final res = await ApiService.react(widget.postId);
-      // Reconcile with server truth
       if (res['error'] == false && mounted) {
         final r = res['results'] as Map<String, dynamic>? ?? {};
         setState(() {
@@ -99,11 +91,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         });
       }
     } catch (_) {
-      // Revert on failure
-      if (mounted) setState(() {
-        _liked     = !_liked;
-        _likeCount += _liked ? 1 : -1;
-      });
+      if (mounted) setState(() { _liked = !_liked; _likeCount += _liked ? 1 : -1; });
     }
   }
 
@@ -122,7 +110,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   }
 
   Future<void> _pickCommentVideo() async {
-    if (_commentMedia.isNotEmpty) return; // 1 video max for comments
+    if (_commentMedia.isNotEmpty) return;
     final f = await _picker.pickVideo(source: ImageSource.gallery);
     if (f != null) setState(() => _commentMedia.add(MediaFile(file: f, isVideo: true)));
   }
@@ -131,12 +119,14 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
 
   Future<void> _submitComment() async {
     final text = _commentCtrl.text.trim();
+    // Allow submit when there is text OR attached media (or both).
     if (text.isEmpty && _commentMedia.isEmpty) return;
+
     setState(() => _submitting = true);
     try {
       await ApiService.createComment(
         target:     widget.postId,
-        content:    text,
+        content:    text,          // may be '' — server stores null, that's fine
         mediaFiles: _commentMedia.map((m) => m.file).toList(),
       );
       _commentCtrl.clear();
@@ -157,7 +147,14 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // FIX: resizeToAvoidBottomInset: false + manual padding so the comment bar
+    // is never double-shifted (was causing RenderFlex overflow).
+    final mq             = MediaQuery.of(context);
+    final keyboardHeight = mq.viewInsets.bottom;
+    final navBarHeight   = mq.padding.bottom;
+
     return Scaffold(
+      resizeToAvoidBottomInset: false,
       appBar: AppBar(
         title: const Text('POST'),
         leading: IconButton(
@@ -169,7 +166,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
             padding: const EdgeInsets.only(right: 16),
             child: Row(mainAxisSize: MainAxisSize.min, children: [
               Container(width: 7, height: 7,
-                decoration: const BoxDecoration(color: AppTheme.cyan, shape: BoxShape.circle)),
+                  decoration: const BoxDecoration(color: AppTheme.cyan, shape: BoxShape.circle)),
               const SizedBox(width: 5),
               Text('LIVE', style: AppTheme.mono(color: AppTheme.cyan, size: 10)),
             ]),
@@ -179,8 +176,10 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       body: _loading
           ? const Center(child: CircularProgressIndicator(color: AppTheme.gold))
           : _post == null
-              ? Center(child: Text('Post not found', style: AppTheme.label(color: AppTheme.textMuted)))
+              ? Center(child: Text('Post not found',
+                  style: AppTheme.label(color: AppTheme.textMuted)))
               : Column(children: [
+                  // ── Scrollable content ────────────────────────────────────
                   Expanded(
                     child: ListView(
                       padding: const EdgeInsets.all(20),
@@ -188,11 +187,16 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                         _buildPostHeader(),
                         const SizedBox(height: 14),
                         _buildPostBody(),
-                        // ── Post media ───────────────────────────────────────
+
+                        // Post media
                         if ((_post!['media'] as List?)?.isNotEmpty == true) ...[
                           const SizedBox(height: 12),
-                          MediaGallery(media: _post!['media'] as List),
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(10),
+                            child: MediaGallery(media: _post!['media'] as List),
+                          ),
                         ],
+
                         if (_post!['quest'] != null) ...[
                           const SizedBox(height: 20),
                           QuestCard(quest: _post!['quest']),
@@ -210,27 +214,34 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                                 if (!context.mounted) return;
                                 ScaffoldMessenger.of(context).showSnackBar(SnackBar(
                                   content: Text(res['message'] ?? ''),
-                                  backgroundColor: res['error'] == false ? AppTheme.cyan : AppTheme.rose,
+                                  backgroundColor: res['error'] == false
+                                      ? AppTheme.cyan : AppTheme.rose,
                                   behavior: SnackBarBehavior.floating,
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                  shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(8)),
                                 ));
                               },
                             ),
                           ),
                         ],
+
                         const SizedBox(height: 24),
-                        // ── Like row ──────────────────────────────────────────
+
+                        // Like row
                         Row(children: [
                           GestureDetector(
                             onTap: _toggleLike,
                             child: AnimatedContainer(
                               duration: const Duration(milliseconds: 200),
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 7),
                               decoration: BoxDecoration(
                                 color: _liked ? AppTheme.roseDim : Colors.transparent,
                                 borderRadius: BorderRadius.circular(8),
                                 border: Border.all(
-                                  color: _liked ? AppTheme.rose.withOpacity(0.4) : AppTheme.border,
+                                  color: _liked
+                                      ? AppTheme.rose.withOpacity(0.4)
+                                      : AppTheme.border,
                                 ),
                               ),
                               child: Row(children: [
@@ -248,83 +259,125 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                             ),
                           ),
                         ]),
+
                         const SizedBox(height: 24),
                         SectionHeader(title: 'Comments (${_comments.length})'),
                         const SizedBox(height: 14),
+
                         if (_comments.isEmpty)
                           Text('No comments yet. Be first!',
-                              style: AppTheme.label(color: AppTheme.textMuted, size: 13))
+                              style: AppTheme.label(
+                                  color: AppTheme.textMuted, size: 13))
                         else
                           ..._comments.map((c) => _CommentTile(comment: c)),
+
                         const SizedBox(height: 20),
                       ],
                     ),
                   ),
+
                   // ── Comment input bar ──────────────────────────────────────
-                  Container(
-                    decoration: const BoxDecoration(
-                      color: AppTheme.surface,
-                      border: Border(top: BorderSide(color: AppTheme.border)),
+                  // Slides up with keyboard, clears system nav bar when closed.
+                  AnimatedPadding(
+                    duration: const Duration(milliseconds: 150),
+                    curve: Curves.easeOut,
+                    padding: EdgeInsets.only(
+                      // When keyboard is visible, push bar up by keyboard height.
+                      // When keyboard is gone, leave room for the system nav bar.
+                      bottom: keyboardHeight > 0 ? keyboardHeight : navBarHeight,
                     ),
-                    padding: EdgeInsets.fromLTRB(
-                      12, 8, 12, MediaQuery.of(context).viewInsets.bottom + 12,
-                    ),
-                    child: Column(mainAxisSize: MainAxisSize.min, children: [
-                      // Comment media preview
-                      if (_commentMedia.isNotEmpty) ...[
-                        MediaPickerBar.buildPreview(_commentMedia, (i) {
-                          setState(() => _commentMedia.removeAt(i));
-                        }),
-                        const SizedBox(height: 8),
-                      ],
-                      Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                        // Media buttons
-                        _CommentMediaBtn(
-                          icon: Icons.image_outlined,
-                          color: AppTheme.cyan,
-                          enabled: _commentMedia.length < 2,
-                          onTap: _pickCommentImage,
-                        ),
-                        const SizedBox(width: 4),
-                        _CommentMediaBtn(
-                          icon: Icons.videocam_outlined,
-                          color: AppTheme.violet,
-                          enabled: _commentMedia.isEmpty,
-                          onTap: _pickCommentVideo,
-                        ),
-                        const SizedBox(width: 8),
-                        // Text field
-                        Expanded(
-                          child: ConstrainedBox(
-                            constraints: const BoxConstraints(maxHeight: 120),
-                            child: TextField(
-                              controller: _commentCtrl,
-                              decoration: const InputDecoration(
-                                hintText: 'Write a comment...',
-                                contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    child: Container(
+                      decoration: const BoxDecoration(
+                        color: AppTheme.surface,
+                        border: Border(top: BorderSide(color: AppTheme.border)),
+                      ),
+                      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+                      child: Column(mainAxisSize: MainAxisSize.min, children: [
+                        // Media preview strip
+                        if (_commentMedia.isNotEmpty) ...[
+                          MediaPickerBar.buildPreview(_commentMedia, (i) {
+                            setState(() => _commentMedia.removeAt(i));
+                          }),
+                          const SizedBox(height: 8),
+                        ],
+
+                        Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                          _CommentMediaBtn(
+                            icon: Icons.image_outlined,
+                            color: AppTheme.cyan,
+                            enabled: _commentMedia.length < 2,
+                            onTap: _pickCommentImage,
+                          ),
+                          const SizedBox(width: 4),
+                          _CommentMediaBtn(
+                            icon: Icons.videocam_outlined,
+                            color: AppTheme.violet,
+                            enabled: _commentMedia.isEmpty,
+                            onTap: _pickCommentVideo,
+                          ),
+                          const SizedBox(width: 8),
+
+                          Expanded(
+                            child: ConstrainedBox(
+                              constraints: const BoxConstraints(maxHeight: 120),
+                              child: TextField(
+                                controller: _commentCtrl,
+                                decoration: const InputDecoration(
+                                  hintText: 'Write a comment...',
+                                  contentPadding: EdgeInsets.symmetric(
+                                      horizontal: 14, vertical: 10),
+                                ),
+                                style: AppTheme.label(
+                                    color: AppTheme.textPrimary, size: 13),
+                                textInputAction: TextInputAction.newline,
+                                keyboardType: TextInputType.multiline,
+                                maxLines: null,
                               ),
-                              style: AppTheme.label(color: AppTheme.textPrimary, size: 13),
-                              textInputAction: TextInputAction.newline,
-                              keyboardType: TextInputType.multiline,
-                              maxLines: null,
                             ),
                           ),
-                        ),
-                        const SizedBox(width: 8),
-                        // Send button
-                        GestureDetector(
-                          onTap: _submitComment,
-                          child: Container(
-                            width: 40, height: 40,
-                            decoration: BoxDecoration(color: AppTheme.gold, borderRadius: BorderRadius.circular(10)),
-                            child: _submitting
-                                ? const Padding(padding: EdgeInsets.all(10),
-                                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
-                                : const Icon(Icons.send_rounded, color: Colors.black, size: 18),
+
+                          const SizedBox(width: 8),
+
+                          // Send — active when there is text OR media attached
+                          ValueListenableBuilder<TextEditingValue>(
+                            valueListenable: _commentCtrl,
+                            builder: (_, val, __) {
+                              final canSend =
+                                  val.text.trim().isNotEmpty ||
+                                  _commentMedia.isNotEmpty;
+                              return GestureDetector(
+                                onTap: canSend ? _submitComment : null,
+                                child: AnimatedContainer(
+                                  duration: const Duration(milliseconds: 200),
+                                  width: 40, height: 40,
+                                  decoration: BoxDecoration(
+                                    color: canSend
+                                        ? AppTheme.gold
+                                        : AppTheme.surfaceElevated,
+                                    borderRadius: BorderRadius.circular(10),
+                                    border: canSend
+                                        ? null
+                                        : Border.all(color: AppTheme.border),
+                                  ),
+                                  child: _submitting
+                                      ? const Padding(
+                                          padding: EdgeInsets.all(10),
+                                          child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                              color: Colors.black),
+                                        )
+                                      : Icon(Icons.send_rounded,
+                                          color: canSend
+                                              ? Colors.black
+                                              : AppTheme.textMuted,
+                                          size: 18),
+                                ),
+                              );
+                            },
                           ),
-                        ),
+                        ]),
                       ]),
-                    ]),
+                    ),
                   ),
                 ]),
     );
@@ -339,12 +392,16 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       const SizedBox(width: 12),
       Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(fullName.isNotEmpty ? fullName : username,
-            style: AppTheme.label(color: AppTheme.textPrimary, size: 15, weight: FontWeight.w700)),
+            style: AppTheme.label(
+                color: AppTheme.textPrimary, size: 15, weight: FontWeight.w700)),
         Row(children: [
-          Text('@$username', style: AppTheme.label(color: AppTheme.textMuted, size: 12)),
+          Text('@$username',
+              style: AppTheme.label(color: AppTheme.textMuted, size: 12)),
           if (createdAt.isNotEmpty) ...[
-            Text('  ·  ', style: AppTheme.label(color: AppTheme.textMuted, size: 12)),
-            Text(createdAt, style: AppTheme.label(color: AppTheme.textMuted, size: 12)),
+            Text('  ·  ',
+                style: AppTheme.label(color: AppTheme.textMuted, size: 12)),
+            Text(createdAt,
+                style: AppTheme.label(color: AppTheme.textMuted, size: 12)),
           ],
         ]),
       ])),
@@ -356,16 +413,19 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     final content = _post!['post']?['content']?.toString() ?? '';
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       if (title.isNotEmpty)
-        Text(title, style: AppTheme.label(color: AppTheme.textPrimary, size: 20, weight: FontWeight.w800)),
+        Text(title,
+            style: AppTheme.label(
+                color: AppTheme.textPrimary, size: 20, weight: FontWeight.w800)),
       if (content.isNotEmpty) ...[
         const SizedBox(height: 8),
-        Text(content, style: AppTheme.label(color: AppTheme.textSecondary, size: 14)),
+        Text(content,
+            style: AppTheme.label(color: AppTheme.textSecondary, size: 14)),
       ],
     ]);
   }
 }
 
-// ── Comment tile with media ────────────────────────────────────────────────────
+// ── Comment tile ───────────────────────────────────────────────────────────────
 
 class _CommentTile extends StatelessWidget {
   final Map<String, dynamic> comment;
@@ -373,7 +433,9 @@ class _CommentTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final media = comment['media'] as List? ?? [];
+    final media   = comment['media'] as List? ?? [];
+    final content = comment['content']?.toString() ?? '';
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -382,7 +444,10 @@ class _CommentTile extends StatelessWidget {
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
             Text(comment['username']?.toString() ?? '',
-                style: AppTheme.label(color: AppTheme.textPrimary, size: 13, weight: FontWeight.w600)),
+                style: AppTheme.label(
+                    color: AppTheme.textPrimary,
+                    size: 13,
+                    weight: FontWeight.w600)),
             const SizedBox(width: 8),
             Text(comment['createdAt']?.toString() ?? '',
                 style: AppTheme.label(color: AppTheme.textMuted, size: 11)),
@@ -394,19 +459,25 @@ class _CommentTile extends StatelessWidget {
             decoration: BoxDecoration(
               color: AppTheme.surfaceElevated,
               borderRadius: const BorderRadius.only(
-                topRight: Radius.circular(10),
-                bottomLeft: Radius.circular(10),
+                topRight:    Radius.circular(10),
+                bottomLeft:  Radius.circular(10),
                 bottomRight: Radius.circular(10),
               ),
               border: Border.all(color: AppTheme.border),
             ),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              if ((comment['content'] ?? '').toString().isNotEmpty)
-                Text(comment['content'].toString(),
-                    style: AppTheme.label(color: AppTheme.textSecondary, size: 13)),
+              // Show text only when non-empty (media-only comments have no text)
+              if (content.isNotEmpty)
+                Text(content,
+                    style: AppTheme.label(
+                        color: AppTheme.textSecondary, size: 13)),
+              // Show attached media
               if (media.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                MediaGallery(media: media),
+                if (content.isNotEmpty) const SizedBox(height: 8),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: MediaGallery(media: media),
+                ),
               ],
             ]),
           ),
@@ -418,10 +489,15 @@ class _CommentTile extends StatelessWidget {
 
 class _CommentMediaBtn extends StatelessWidget {
   final IconData icon;
-  final Color color;
-  final bool enabled;
+  final Color    color;
+  final bool     enabled;
   final VoidCallback onTap;
-  const _CommentMediaBtn({required this.icon, required this.color, required this.enabled, required this.onTap});
+  const _CommentMediaBtn({
+    required this.icon,
+    required this.color,
+    required this.enabled,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -432,10 +508,12 @@ class _CommentMediaBtn extends StatelessWidget {
         decoration: BoxDecoration(
           color: enabled ? color.withOpacity(0.1) : AppTheme.surfaceElevated,
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: enabled ? color.withOpacity(0.3) : AppTheme.border),
+          border: Border.all(
+              color: enabled ? color.withOpacity(0.3) : AppTheme.border),
         ),
         alignment: Alignment.center,
-        child: Icon(icon, color: enabled ? color : AppTheme.textMuted, size: 16),
+        child: Icon(icon,
+            color: enabled ? color : AppTheme.textMuted, size: 16),
       ),
     );
   }

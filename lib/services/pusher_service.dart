@@ -5,7 +5,7 @@ import 'package:pusher_channels_flutter/pusher_channels_flutter.dart';
 // ─── CHANGE THESE to match your Pusher dashboard ────────────────────────────
 const String kPusherKey     = '55642bf8aa5a6dff2758';
 const String kPusherCluster = 'ap1'; // e.g. 'ap1', 'us2'
-const String kPusherAuthUrl = 'http://10.54.172.44:8000/broadcasting/auth';
+const String kPusherAuthUrl = 'http://10.54.172.137:8000/broadcasting/auth';
 // ─────────────────────────────────────────────────────────────────────────────
 
 class AppNotification {
