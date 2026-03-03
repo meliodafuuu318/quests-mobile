@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../services/pusher_service.dart';
 import '../theme/app_theme.dart';
 
 // ─── STAT BADGE ──────────────────────────────────────────────────────────────
@@ -276,51 +278,6 @@ class _ShimmerBoxState extends State<ShimmerBox> with SingleTickerProviderStateM
   }
 }
 
-// ─── NOTIFICATION BELL ───────────────────────────────────────────────────────
-
-class NotificationBell extends StatelessWidget {
-  final int count;
-  final VoidCallback? onTap;
-  const NotificationBell({super.key, this.count = 0, this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8),
-        child: Stack(
-          clipBehavior: Clip.none,
-          children: [
-            Icon(
-              count > 0 ? Icons.notifications : Icons.notifications_outlined,
-              color: count > 0 ? AppTheme.gold : AppTheme.textSecondary,
-              size: 22,
-            ),
-            if (count > 0)
-              Positioned(
-                top: -4, right: -4,
-                child: Container(
-                  padding: const EdgeInsets.all(3),
-                  decoration: const BoxDecoration(color: AppTheme.rose, shape: BoxShape.circle),
-                  child: Text(
-                    count > 99 ? '99+' : '$count',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 8,
-                      fontWeight: FontWeight.w700,
-                      fontFamily: 'monospace',
-                    ),
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 // ─── USER AVATAR ─────────────────────────────────────────────────────────────
 
 class UserAvatar extends StatelessWidget {
@@ -347,4 +304,57 @@ class UserAvatar extends StatelessWidget {
       ),
     );
   }
+}
+
+// ─── NOTIFICATION BELL ───────────────────────────────────────────────────────
+// Reads unread count from PusherService via Provider.
+// Tapping opens the notification panel (registered via NotificationRouter).
+
+class NotificationBell extends StatelessWidget {
+  const NotificationBell({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final count = context.watch<PusherService>().unreadCount;
+    return GestureDetector(
+      onTap: () {
+        // Lazy call — avoids circular import. notification_panel.dart
+        // exports showNotificationPanel() which we call via the router.
+        NotificationBellRouter._show?.call(context);
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        child: Stack(clipBehavior: Clip.none, children: [
+          Icon(
+            count > 0 ? Icons.notifications : Icons.notifications_outlined,
+            color: count > 0 ? AppTheme.gold : AppTheme.textSecondary,
+            size: 22,
+          ),
+          if (count > 0)
+            Positioned(
+              top: -4, right: -4,
+              child: Container(
+                padding: const EdgeInsets.all(3),
+                decoration: const BoxDecoration(color: AppTheme.rose, shape: BoxShape.circle),
+                child: Text(
+                  count > 99 ? '99+' : '$count',
+                  style: const TextStyle(
+                    color: Colors.white, fontSize: 8,
+                    fontWeight: FontWeight.w700, fontFamily: 'monospace',
+                  ),
+                ),
+              ),
+            ),
+        ]),
+      ),
+    );
+  }
+}
+
+/// Register the panel opener once so NotificationBell can call it
+/// without importing notification_panel.dart (which imports api_service).
+/// Call [NotificationBellRouter.register] in app_shell.dart initState.
+class NotificationBellRouter {
+  static void Function(BuildContext)? _show;
+  static void register(void Function(BuildContext) fn) => _show = fn;
 }

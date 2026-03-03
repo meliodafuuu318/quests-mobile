@@ -1,8 +1,10 @@
 import '../auth/login_screen.dart';
+import '../feed/post_detail_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../services/auth_provider.dart';
 import '../../services/api_service.dart';
+import '../../services/pusher_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common_widgets.dart';
 
@@ -21,9 +23,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool get _isSelf => widget.username == null;
 
   @override
-  void initState() { super.initState(); _load(); }
+  void initState() {
+    super.initState();
+    _load();
+    // Fetch initial unread notification count when own profile opens
+    if (_isSelf) _syncNotificationCount();
+  }
 
-  // Safely parse any numeric value from JSON (could be int, double, or String)
+  Future<void> _syncNotificationCount() async {
+    try {
+      final res = await ApiService.getNotifications();
+      if (res['error'] == false) {
+        final unread = res['results']?['unread_count'];
+        if (unread != null && mounted) {
+          PusherService.instance.setUnreadCount(_toInt(unread));
+        }
+      }
+    } catch (_) {}
+  }
+
   static double _toDouble(dynamic v) {
     if (v == null) return 0.0;
     if (v is double) return v;
@@ -32,10 +50,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   static int _toInt(dynamic v) {
-    if (v == null) return 1;
+    if (v == null) return 0;
     if (v is int) return v;
     if (v is double) return v.toInt();
-    return int.tryParse(v.toString()) ?? 1;
+    return int.tryParse(v.toString()) ?? 0;
   }
 
   Future<void> _load() async {
@@ -66,9 +84,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
         title: Text(_isSelf ? 'PROFILE' : '@${widget.username ?? ''}'),
         leading: _isSelf
             ? null
-            : IconButton(icon: const Icon(Icons.arrow_back_ios_new, size: 18), onPressed: () => Navigator.pop(context)),
+            : IconButton(
+                icon: const Icon(Icons.arrow_back_ios_new, size: 18),
+                onPressed: () => Navigator.pop(context),
+              ),
         actions: [
-          if (_isSelf)
+          if (_isSelf) ...[
+            // Show bell with live badge on own profile
+            const NotificationBell(),
             IconButton(
               icon: const Icon(Icons.logout_outlined, size: 20),
               onPressed: () async {
@@ -81,6 +104,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               },
               color: AppTheme.rose,
             ),
+          ],
         ],
       ),
       body: _loading
@@ -116,7 +140,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     SliverToBoxAdapter(
                       child: Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 20),
-                        child: Text('No posts yet.', style: AppTheme.label(color: AppTheme.textMuted, size: 13)),
+                        child: Text('No posts yet.',
+                            style: AppTheme.label(color: AppTheme.textMuted, size: 13)),
                       ),
                     )
                   else
@@ -131,6 +156,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 }
+
+// ─── PROFILE HEADER ───────────────────────────────────────────────────────────
 
 class _ProfileHeader extends StatelessWidget {
   final Map<String, dynamic> user;
@@ -149,15 +176,15 @@ class _ProfileHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final username = user['username']?.toString() ?? '';
+    final username  = user['username']?.toString() ?? '';
     final firstName = user['first_name']?.toString() ?? '';
-    final lastName = user['last_name']?.toString() ?? '';
-    final exp = toDouble(user['exp']);
-    final level = toInt(user['level']);
-    final bio = user['bio']?.toString();
-    final city = user['city']?.toString();
-    final country = user['country']?.toString();
-    final maxExp = (level * 1000).toDouble();
+    final lastName  = user['last_name']?.toString() ?? '';
+    final exp       = toDouble(user['exp']);
+    final level     = toInt(user['level']);
+    final bio       = user['bio']?.toString();
+    final city      = user['city']?.toString();
+    final country   = user['country']?.toString();
+    final maxExp    = (level * 1000).toDouble();
 
     return Padding(
       padding: const EdgeInsets.all(24),
@@ -213,41 +240,78 @@ class _ProfileHeader extends StatelessWidget {
   }
 }
 
+// ─── MINI POST CARD ───────────────────────────────────────────────────────────
+// Now tappable — opens PostDetailScreen.
+
 class _MiniPostCard extends StatelessWidget {
   final Map<String, dynamic> post;
   const _MiniPostCard({required this.post});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.fromLTRB(20, 0, 20, 12),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: AppTheme.border),
-      ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(
-          post['title']?.toString() ?? 'Untitled',
-          style: AppTheme.label(color: AppTheme.textPrimary, size: 14, weight: FontWeight.w600),
+    final postId = post['id']?.toString();
+
+    return GestureDetector(
+      onTap: postId != null
+          ? () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => PostDetailScreen(postId: postId)),
+              )
+          : null,
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: AppTheme.surface,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: AppTheme.border),
         ),
-        if (post['content'] != null && post['content'].toString().isNotEmpty) ...[
-          const SizedBox(height: 4),
-          Text(
-            post['content'].toString(),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: AppTheme.label(color: AppTheme.textSecondary, size: 12),
-          ),
-        ],
-        const SizedBox(height: 8),
-        Row(children: [
-          const Icon(Icons.access_time_outlined, size: 12, color: AppTheme.textMuted),
-          const SizedBox(width: 4),
-          Text(post['datetime']?.toString() ?? '', style: AppTheme.label(color: AppTheme.textMuted, size: 11)),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Expanded(
+              child: Text(
+                post['title']?.toString() ?? 'Untitled',
+                style: AppTheme.label(color: AppTheme.textPrimary, size: 14, weight: FontWeight.w600),
+              ),
+            ),
+            const Icon(Icons.chevron_right, color: AppTheme.textMuted, size: 16),
+          ]),
+          if (post['content'] != null && post['content'].toString().isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(
+              post['content'].toString(),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: AppTheme.label(color: AppTheme.textSecondary, size: 12),
+            ),
+          ],
+          const SizedBox(height: 8),
+          Row(children: [
+            const Icon(Icons.access_time_outlined, size: 12, color: AppTheme.textMuted),
+            const SizedBox(width: 4),
+            Text(
+              _formatTimestamp(post['datetime']?.toString() ?? ''),
+              style: AppTheme.label(color: AppTheme.textMuted, size: 11),
+            ),
+          ]),
         ]),
-      ]),
+      ),
     );
+  }
+
+  /// Format ISO or raw timestamp to "Y-m-d h:i" style.
+  String _formatTimestamp(String raw) {
+    if (raw.isEmpty) return '';
+    try {
+      final dt = DateTime.parse(raw).toLocal();
+      final y  = dt.year;
+      final m  = dt.month.toString().padLeft(2, '0');
+      final d  = dt.day.toString().padLeft(2, '0');
+      final h  = (dt.hour % 12 == 0 ? 12 : dt.hour % 12).toString().padLeft(2, '0');
+      final mi = dt.minute.toString().padLeft(2, '0');
+      return '$y-$m-$d $h:$mi';
+    } catch (_) {
+      return raw;
+    }
   }
 }

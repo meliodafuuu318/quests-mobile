@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../services/api_service.dart';
+import '../services/pusher_service.dart';
 import '../theme/app_theme.dart';
 import 'feed/feed_screen.dart';
 import 'friends/friends_screen.dart';
@@ -15,6 +18,27 @@ class _AppShellState extends State<AppShell> {
   int _idx = 0;
 
   final _pages = const [FeedScreen(), FriendsScreen(), ProfileScreen()];
+
+  @override
+  void initState() {
+    super.initState();
+    // Fetch initial unread count so the bell badge is correct on app start.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _syncUnread());
+  }
+
+  Future<void> _syncUnread() async {
+    try {
+      final res = await ApiService.getNotifications();
+      if (res['error'] == false && mounted) {
+        final unread = res['results']?['unread_count'];
+        if (unread != null) {
+          PusherService.instance.setUnreadCount(
+            int.tryParse(unread.toString()) ?? 0,
+          );
+        }
+      }
+    } catch (_) {}
+  }
 
   @override
   Widget build(BuildContext context) {

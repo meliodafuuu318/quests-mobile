@@ -3,9 +3,9 @@ import 'package:flutter/foundation.dart';
 import 'package:pusher_channels_flutter/pusher_channels_flutter.dart';
 
 // ─── CHANGE THESE to match your Pusher dashboard ────────────────────────────
-const String kPusherKey     = '55642bf8aa5a6dff2758';
-const String kPusherCluster = 'ap1'; // e.g. 'ap1', 'us2'
-const String kPusherAuthUrl = 'http://10.54.172.137:8000/broadcasting/auth';
+const String kPusherKey     = 'YOUR_PUSHER_APP_KEY';
+const String kPusherCluster = 'YOUR_PUSHER_CLUSTER'; // e.g. 'ap1', 'us2'
+const String kPusherAuthUrl = 'http://10.54.172.91:8000/broadcasting/auth';
 // ─────────────────────────────────────────────────────────────────────────────
 
 class AppNotification {
@@ -39,7 +39,14 @@ class PusherService extends ChangeNotifier {
 
   final List<AppNotification> _notifications = [];
   List<AppNotification> get notifications => List.unmodifiable(_notifications);
-  int get unreadCount => _notifications.where((n) => !n.read).length;
+
+  // Server-driven unread count (synced from DB on panel open).
+  int _serverUnread = 0;
+  int get unreadCount => _serverUnread + _notifications.where((n) => !n.read).length;
+
+  void setUnreadCount(int count) { _serverUnread = count; notifyListeners(); }
+  void decrementUnread() { if (_serverUnread > 0) { _serverUnread--; notifyListeners(); } }
+  void clearAllRead() { _serverUnread = 0; for (final n in _notifications) n.read = true; notifyListeners(); }
 
   // Feed callback — called when a new public/friends post arrives
   VoidCallback? onNewPostAvailable;
