@@ -62,7 +62,6 @@ class ApiService {
     return jsonDecode(r.body) as Map<String, dynamic>;
   }
 
-  /// Multipart POST — for endpoints that accept files alongside fields.
   static Future<Map<String, dynamic>> _multipartPost(
     String path,
     Map<String, String> fields,
@@ -77,7 +76,7 @@ class ApiService {
       final file = File(f.path);
       final mime = f.mimeType ?? _guessMime(f.path);
       req.files.add(await http.MultipartFile.fromPath(
-        'media[]',  // Laravel expects media[]
+        'media[]',
         file.path,
         contentType: _parseMediaType(mime),
       ));
@@ -118,7 +117,7 @@ class ApiService {
 
   static Future<Map<String, dynamic>> logout() => _post('/auth/logout', {});
 
-  // ─── FEED (page-based pagination) ────────────────────────────────────────
+  // ─── FEED ────────────────────────────────────────────────────────────────
   static Future<Map<String, dynamic>> getFeed({int page = 1, int perPage = 10}) =>
       _get('/post?page=$page&per_page=$perPage');
 
@@ -127,7 +126,6 @@ class ApiService {
 
   static Future<Map<String, dynamic>> getPost(String id) => _get('/post/show?postId=$id');
 
-  // Creates a post — sends as multipart when media files are attached
   static Future<Map<String, dynamic>> createPost({
     required String title,
     required String content,
@@ -138,15 +136,11 @@ class ApiService {
     List<XFile> mediaFiles = const [],
   }) async {
     final fields = {
-      'type': 'post',
-      'title': title,
-      'content': content,
+      'type': 'post', 'title': title, 'content': content,
       'visibility': visibility,
       'rewardExp': rewardExp.toString(),
       'rewardPoints': rewardPoints.toString(),
     };
-
-    // Serialize tasks as indexed form fields (Laravel array parsing)
     for (int i = 0; i < tasks.length; i++) {
       final t = tasks[i];
       fields['tasks[$i][title]']        = t['title'].toString();
@@ -155,16 +149,13 @@ class ApiService {
       fields['tasks[$i][rewardPoints]'] = t['rewardPoints'].toString();
       fields['tasks[$i][order]']        = t['order'].toString();
     }
-
     if (mediaFiles.isEmpty) {
-      // Pure JSON path (no media)
       return _post('/post', {
         'type': 'post', 'title': title, 'content': content,
         'visibility': visibility, 'rewardExp': rewardExp, 'rewardPoints': rewardPoints,
         'tasks': tasks,
       });
     }
-
     return _multipartPost('/post', fields, mediaFiles);
   }
 
@@ -174,7 +165,6 @@ class ApiService {
   static Future<Map<String, dynamic>> getPostComments(String id) =>
       _get('/post/comments?postId=$id');
 
-  /// React returns {error, results: {likes_count, liked}}
   static Future<Map<String, dynamic>> react(String likeTarget) =>
       _post('/react', {'type': 'like', 'likeTarget': likeTarget});
 
@@ -186,36 +176,34 @@ class ApiService {
   }) {
     if (mediaFiles.isEmpty) {
       return _post('/comment/create', {
-        'type': 'comment',
-        'commentTarget': target,
-        'content': content,
+        'type': 'comment', 'commentTarget': target, 'content': content,
       });
     }
     return _multipartPost('/comment/create', {
-      'type': 'comment',
-      'commentTarget': target,
-      'content': content,
+      'type': 'comment', 'commentTarget': target, 'content': content,
     }, mediaFiles);
   }
 
   // ─── NOTIFICATIONS ────────────────────────────────────────────────────────
-  /// Fetch paginated notifications. Returns {notifications: {data:[...]}, unread_count: N}
-  static Future<Map<String, dynamic>> getNotifications() =>
-      _get('/notifications');
+  static Future<Map<String, dynamic>> getNotifications() => _get('/notifications');
 
-  /// Mark read: pass notificationId for single, or all=true for all.
   static Future<Map<String, dynamic>> markNotificationRead({
-    int? notificationId,
-    bool all = false,
+    int? notificationId, bool all = false,
   }) => _post('/notifications/read', {
     if (all) 'all': true,
     if (notificationId != null) 'notificationId': notificationId,
   });
 
   // ─── QUESTS ──────────────────────────────────────────────────────────────
-  static Future<Map<String, dynamic>> joinQuest(String code)     => _post('/quest/join',         {'questCode': code});
-  static Future<Map<String, dynamic>> completeQuest(String id)   => _post('/quest/complete',      {'questId': id});
-  static Future<Map<String, dynamic>> completeTask(String id)    => _post('/quest/task/complete', {'taskId': id});
+  static Future<Map<String, dynamic>> joinQuest(String code)    => _post('/quest/join',         {'questCode': code});
+  static Future<Map<String, dynamic>> completeQuest(String id)  => _post('/quest/complete',      {'questId': id});
+  static Future<Map<String, dynamic>> completeTask(String id)   => _post('/quest/task/complete', {'taskId': id});
+
+  /// Vote on a community task completion submission
+  static Future<Map<String, dynamic>> verifyTask(String taskId) =>
+      _post('/quest/task/complete', {'taskId': taskId, 'verify': true});
+  static Future<Map<String, dynamic>> flagTask(String taskId)   =>
+      _post('/quest/task/complete', {'taskId': taskId, 'flag': true});
 
   // ─── USER ────────────────────────────────────────────────────────────────
   static Future<Map<String, dynamic>> getAccountInfo()              => _get('/user/account-info');

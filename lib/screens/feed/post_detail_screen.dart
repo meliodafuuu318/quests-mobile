@@ -406,27 +406,93 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   }
 }
 
-class _CommentTile extends StatelessWidget {
+// ─── COMMENT TILE ────────────────────────────────────────────────────────────
+// Handles two modes:
+//   • normal comment  — plain bubble
+//   • verification submission — distinctive card with approve/flag voting
+//     and a "COMPLETED" overlay when the quest creator has approved it.
+
+class _CommentTile extends StatefulWidget {
   final Map<String, dynamic> comment;
-  const _CommentTile({required this.comment});
+  const _CommentTile({super.key, required this.comment});
+
+  @override
+  State<_CommentTile> createState() => _CommentTileState();
+}
+
+class _CommentTileState extends State<_CommentTile> {
+  late int    _approveCount;
+  late int    _flagCount;
+  late String? _myVote;       // null | 'approved' | 'flagged'
+  bool        _voting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _approveCount = _toInt(widget.comment['approve_count']);
+    _flagCount    = _toInt(widget.comment['flag_count']);
+    _myVote       = widget.comment['my_vote']?.toString();
+  }
+
+  int _toInt(dynamic v) {
+    if (v == null) return 0;
+    if (v is int) return v;
+    return int.tryParse(v.toString()) ?? 0;
+  }
+
+  Future<void> _vote(bool approve) async {
+    if (_voting || _myVote != null) return;
+    final taskId = widget.comment['quest_participant_task_id']?.toString();
+    if (taskId == null) return;
+
+    setState(() => _voting = true);
+    try {
+      final res = approve
+          ? await ApiService.verifyTask(taskId)
+          : await ApiService.flagTask(taskId);
+      if (res['error'] == false && mounted) {
+        setState(() {
+          _myVote = approve ? 'approved' : 'flagged';
+          if (approve) _approveCount++;
+          else         _flagCount++;
+        });
+      } else if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(res['message'] ?? 'Vote failed'),
+          backgroundColor: AppTheme.rose,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        ));
+      }
+    } catch (_) {}
+    if (mounted) setState(() => _voting = false);
+  }
 
   @override
   Widget build(BuildContext context) {
-    final media   = comment['media'] as List? ?? [];
-    final content = comment['content']?.toString() ?? '';
+    final isVerification = widget.comment['is_verification'] == true;
+
+    return isVerification
+        ? _buildVerificationTile()
+        : _buildNormalTile();
+  }
+
+  // ── Normal comment ───────────────────────────────────────────────────────
+  Widget _buildNormalTile() {
+    final media   = widget.comment['media'] as List? ?? [];
+    final content = widget.comment['content']?.toString() ?? '';
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        UserAvatar(username: comment['username']?.toString() ?? 'u', size: 32),
+        UserAvatar(username: widget.comment['username']?.toString() ?? 'u', size: 32),
         const SizedBox(width: 10),
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
-            Text(comment['username']?.toString() ?? '',
-                style: AppTheme.label(
-                    color: AppTheme.textPrimary, size: 13, weight: FontWeight.w600)),
+            Text(widget.comment['username']?.toString() ?? '',
+                style: AppTheme.label(color: AppTheme.textPrimary, size: 13, weight: FontWeight.w600)),
             const SizedBox(width: 8),
-            Text(comment['createdAt']?.toString() ?? '',
+            Text(widget.comment['createdAt']?.toString() ?? '',
                 style: AppTheme.label(color: AppTheme.textMuted, size: 11)),
           ]),
           const SizedBox(height: 4),
@@ -444,8 +510,7 @@ class _CommentTile extends StatelessWidget {
             ),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               if (content.isNotEmpty)
-                Text(content,
-                    style: AppTheme.label(color: AppTheme.textSecondary, size: 13)),
+                Text(content, style: AppTheme.label(color: AppTheme.textSecondary, size: 13)),
               if (media.isNotEmpty) ...[
                 if (content.isNotEmpty) const SizedBox(height: 8),
                 ClipRRect(
@@ -457,6 +522,232 @@ class _CommentTile extends StatelessWidget {
           ),
         ])),
       ]),
+    );
+  }
+
+  // ── Verification submission ───────────────────────────────────────────────
+  Widget _buildVerificationTile() {
+    final media             = widget.comment['media'] as List? ?? [];
+    final content           = widget.comment['content']?.toString() ?? '';
+    final status            = widget.comment['completion_status']?.toString();
+    final isCompleted       = status == 'completed';
+    final isCommunityVerified = status == 'community_verified';
+    final isFlagged         = status == 'flagged';
+    final username          = widget.comment['username']?.toString() ?? 'u';
+
+    // Colour scheme changes by status
+    final accentColor = isCompleted
+        ? AppTheme.cyan
+        : isCommunityVerified
+            ? AppTheme.violet
+            : isFlagged
+                ? AppTheme.rose
+                : AppTheme.gold;
+
+    final bgColor = isCompleted
+        ? AppTheme.cyan.withOpacity(0.06)
+        : isCommunityVerified
+            ? AppTheme.violet.withOpacity(0.06)
+            : isFlagged
+                ? AppTheme.rose.withOpacity(0.06)
+                : AppTheme.gold.withOpacity(0.06);
+
+    final statusLabel = isCompleted
+        ? 'COMPLETED'
+        : isCommunityVerified
+            ? 'COMMUNITY VERIFIED'
+            : isFlagged
+                ? 'FLAGGED'
+                : 'PENDING REVIEW';
+
+    final statusIcon = isCompleted
+        ? Icons.verified_outlined
+        : isCommunityVerified
+            ? Icons.people_outlined
+            : isFlagged
+                ? Icons.flag_outlined
+                : Icons.hourglass_empty_outlined;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Container(
+        decoration: BoxDecoration(
+          color: bgColor,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: accentColor.withOpacity(0.35)),
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+
+          // ── Header bar ─────────────────────────────────────────────────
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: accentColor.withOpacity(0.10),
+              borderRadius: const BorderRadius.only(
+                topLeft:  Radius.circular(11),
+                topRight: Radius.circular(11),
+              ),
+            ),
+            child: Row(children: [
+              Icon(Icons.assignment_turned_in_outlined, color: accentColor, size: 13),
+              const SizedBox(width: 6),
+              Text('TASK SUBMISSION', style: AppTheme.mono(color: accentColor, size: 10)),
+              const Spacer(),
+              Icon(statusIcon, color: accentColor, size: 12),
+              const SizedBox(width: 4),
+              Text(statusLabel, style: AppTheme.label(color: accentColor, size: 10)),
+            ]),
+          ),
+
+          // ── User + timestamp ────────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+            child: Row(children: [
+              UserAvatar(username: username, size: 28),
+              const SizedBox(width: 8),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(username,
+                    style: AppTheme.label(color: AppTheme.textPrimary, size: 13, weight: FontWeight.w600)),
+                Text(widget.comment['createdAt']?.toString() ?? '',
+                    style: AppTheme.label(color: AppTheme.textMuted, size: 11)),
+              ])),
+              // Completed ribbon
+              if (isCompleted)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: AppTheme.cyan.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: AppTheme.cyan.withOpacity(0.5)),
+                  ),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    const Icon(Icons.check_circle_outline, color: AppTheme.cyan, size: 13),
+                    const SizedBox(width: 4),
+                    Text('APPROVED', style: AppTheme.mono(color: AppTheme.cyan, size: 10)),
+                  ]),
+                ),
+            ]),
+          ),
+
+          // ── Comment content ─────────────────────────────────────────────
+          if (content.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+              child: Text(content, style: AppTheme.label(color: AppTheme.textSecondary, size: 13)),
+            ),
+
+          // ── Media proof ─────────────────────────────────────────────────
+          if (media.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: MediaGallery(media: media),
+              ),
+            ),
+
+          const SizedBox(height: 10),
+          const Divider(height: 1, color: AppTheme.border),
+
+          // ── Vote row (approve / flag) — hidden when already completed ───
+          if (!isCompleted)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              child: Row(children: [
+                // Approve button
+                _VoteBtn(
+                  icon:    Icons.thumb_up_alt_outlined,
+                  label:   '$_approveCount',
+                  color:   AppTheme.cyan,
+                  active:  _myVote == 'approved',
+                  enabled: _myVote == null && !_voting,
+                  loading: _voting && _myVote == null,
+                  onTap:   () => _vote(true),
+                ),
+                const SizedBox(width: 12),
+                // Flag button
+                _VoteBtn(
+                  icon:    Icons.thumb_down_alt_outlined,
+                  label:   '$_flagCount',
+                  color:   AppTheme.rose,
+                  active:  _myVote == 'flagged',
+                  enabled: _myVote == null && !_voting,
+                  loading: false,
+                  onTap:   () => _vote(false),
+                ),
+                const Spacer(),
+                Text(
+                  _myVote == 'approved'
+                      ? 'You approved'
+                      : _myVote == 'flagged'
+                          ? 'You flagged'
+                          : 'Vote on this submission',
+                  style: AppTheme.label(color: AppTheme.textMuted, size: 11),
+                ),
+              ]),
+            ),
+
+          // ── Completed footer ─────────────────────────────────────────────
+          if (isCompleted)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+              child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                const Icon(Icons.star_outline, color: AppTheme.gold, size: 14),
+                const SizedBox(width: 6),
+                Text('Quest creator approved this submission',
+                    style: AppTheme.label(color: AppTheme.gold, size: 12)),
+              ]),
+            ),
+        ]),
+      ),
+    );
+  }
+}
+
+// ─── VOTE BUTTON ─────────────────────────────────────────────────────────────
+
+class _VoteBtn extends StatelessWidget {
+  final IconData icon;
+  final String   label;
+  final Color    color;
+  final bool     active;
+  final bool     enabled;
+  final bool     loading;
+  final VoidCallback onTap;
+
+  const _VoteBtn({
+    required this.icon, required this.label, required this.color,
+    required this.active, required this.enabled,
+    required this.loading, required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: enabled ? onTap : null,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color:  active ? color.withOpacity(0.15) : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: active ? color.withOpacity(0.5) : AppTheme.border),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          loading
+              ? SizedBox(width: 14, height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: color))
+              : Icon(icon,
+                  color:  active ? color : (enabled ? AppTheme.textMuted : AppTheme.border),
+                  size: 15),
+          const SizedBox(width: 5),
+          Text(label,
+              style: AppTheme.label(
+                color: active ? color : (enabled ? AppTheme.textMuted : AppTheme.border),
+                size: 13, weight: FontWeight.w600,
+              )),
+        ]),
+      ),
     );
   }
 }
