@@ -470,7 +470,8 @@ class _CommentTileState extends State<_CommentTile> {
 
   @override
   Widget build(BuildContext context) {
-    final isVerification = widget.comment['is_verification'] == true;
+    final isVerification = widget.comment['is_verification'] == true ||
+        widget.comment['is_verification'] == 1;
 
     return isVerification
         ? _buildVerificationTile()
