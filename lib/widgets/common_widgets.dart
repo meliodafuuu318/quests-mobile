@@ -279,19 +279,54 @@ class _ShimmerBoxState extends State<ShimmerBox> with SingleTickerProviderStateM
 }
 
 // ─── USER AVATAR ─────────────────────────────────────────────────────────────
+// Renders a server image when [avatarUrl] is provided; falls back to a
+// coloured initials circle on error or when the URL is absent.
 
 class UserAvatar extends StatelessWidget {
   final String username;
   final double size;
   final Color? color;
-  const UserAvatar({super.key, required this.username, this.size = 36, this.color});
+  /// Relative ("/storage/…") or absolute URL from the API.
+  /// Relative paths are prefixed with [_base] automatically.
+  final String? avatarUrl;
+
+  static const String _base = 'http://10.54.172.88:8000';
+
+  const UserAvatar({
+    super.key,
+    required this.username,
+    this.size = 36,
+    this.color,
+    this.avatarUrl,
+  });
 
   @override
   Widget build(BuildContext context) {
+    if (avatarUrl != null && avatarUrl!.isNotEmpty) {
+      final url =
+          avatarUrl!.startsWith('http') ? avatarUrl! : '$_base$avatarUrl';
+      return ClipOval(
+        child: Image.network(
+          url,
+          width: size,
+          height: size,
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => _initials(),
+        ),
+      );
+    }
+    return _initials();
+  }
+
+  Widget _initials() {
     final colors = [AppTheme.gold, AppTheme.cyan, AppTheme.violet, AppTheme.rose];
-    final c = color ?? (username.isNotEmpty ? colors[username.codeUnitAt(0) % colors.length] : AppTheme.gold);
+    final c = color ??
+        (username.isNotEmpty
+            ? colors[username.codeUnitAt(0) % colors.length]
+            : AppTheme.gold);
     return Container(
-      width: size, height: size,
+      width: size,
+      height: size,
       decoration: BoxDecoration(
         color: c.withOpacity(0.15),
         shape: BoxShape.circle,
@@ -300,15 +335,18 @@ class UserAvatar extends StatelessWidget {
       alignment: Alignment.center,
       child: Text(
         username.isNotEmpty ? username[0].toUpperCase() : '?',
-        style: TextStyle(color: c, fontSize: size * 0.38, fontWeight: FontWeight.w700, fontFamily: 'monospace'),
+        style: TextStyle(
+          color: c,
+          fontSize: size * 0.38,
+          fontWeight: FontWeight.w700,
+          fontFamily: 'monospace',
+        ),
       ),
     );
   }
 }
 
 // ─── NOTIFICATION BELL ───────────────────────────────────────────────────────
-// Reads unread count from PusherService via Provider.
-// Tapping opens the notification panel (registered via NotificationRouter).
 
 class NotificationBell extends StatelessWidget {
   const NotificationBell({super.key});
@@ -317,11 +355,7 @@ class NotificationBell extends StatelessWidget {
   Widget build(BuildContext context) {
     final count = context.watch<PusherService>().unreadCount;
     return GestureDetector(
-      onTap: () {
-        // Lazy call — avoids circular import. notification_panel.dart
-        // exports showNotificationPanel() which we call via the router.
-        NotificationBellRouter._show?.call(context);
-      },
+      onTap: () => NotificationBellRouter._show?.call(context),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 8),
         child: Stack(clipBehavior: Clip.none, children: [
@@ -351,9 +385,6 @@ class NotificationBell extends StatelessWidget {
   }
 }
 
-/// Register the panel opener once so NotificationBell can call it
-/// without importing notification_panel.dart (which imports api_service).
-/// Call [NotificationBellRouter.register] in app_shell.dart initState.
 class NotificationBellRouter {
   static void Function(BuildContext)? _show;
   static void register(void Function(BuildContext) fn) => _show = fn;

@@ -47,8 +47,6 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     if (mounted) setState(() => _likeCount = count);
   }
 
-  // ── Load ──────────────────────────────────────────────────────────────────
-
   Future<void> _load() async {
     try {
       final postRes = await ApiService.getPost(widget.postId);
@@ -77,8 +75,6 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     } catch (_) {}
   }
 
-  // ── Like ──────────────────────────────────────────────────────────────────
-
   Future<void> _toggleLike() async {
     setState(() { _liked = !_liked; _likeCount += _liked ? 1 : -1; });
     try {
@@ -94,8 +90,6 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       if (mounted) setState(() { _liked = !_liked; _likeCount += _liked ? 1 : -1; });
     }
   }
-
-  // ── Comment media ─────────────────────────────────────────────────────────
 
   Future<void> _pickCommentImage() async {
     if (_commentMedia.length >= 2) return;
@@ -115,18 +109,15 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     if (f != null) setState(() => _commentMedia.add(MediaFile(file: f, isVideo: true)));
   }
 
-  // ── Submit comment ────────────────────────────────────────────────────────
-
   Future<void> _submitComment() async {
     final text = _commentCtrl.text.trim();
-    // Allow submit when there is text OR attached media (or both).
     if (text.isEmpty && _commentMedia.isEmpty) return;
 
     setState(() => _submitting = true);
     try {
       await ApiService.createComment(
         target:     widget.postId,
-        content:    text,          // may be '' — server stores null, that's fine
+        content:    text,
         mediaFiles: _commentMedia.map((m) => m.file).toList(),
       );
       _commentCtrl.clear();
@@ -143,12 +134,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     return int.tryParse(v.toString()) ?? 0;
   }
 
-  // ── Build ─────────────────────────────────────────────────────────────────
-
   @override
   Widget build(BuildContext context) {
-    // FIX: resizeToAvoidBottomInset: false + manual padding so the comment bar
-    // is never double-shifted (was causing RenderFlex overflow).
     final mq             = MediaQuery.of(context);
     final keyboardHeight = mq.viewInsets.bottom;
     final navBarHeight   = mq.padding.bottom;
@@ -165,8 +152,10 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
           Padding(
             padding: const EdgeInsets.only(right: 16),
             child: Row(mainAxisSize: MainAxisSize.min, children: [
-              Container(width: 7, height: 7,
-                  decoration: const BoxDecoration(color: AppTheme.cyan, shape: BoxShape.circle)),
+              Container(
+                width: 7, height: 7,
+                decoration: const BoxDecoration(color: AppTheme.cyan, shape: BoxShape.circle),
+              ),
               const SizedBox(width: 5),
               Text('LIVE', style: AppTheme.mono(color: AppTheme.cyan, size: 10)),
             ]),
@@ -179,7 +168,6 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
               ? Center(child: Text('Post not found',
                   style: AppTheme.label(color: AppTheme.textMuted)))
               : Column(children: [
-                  // ── Scrollable content ────────────────────────────────────
                   Expanded(
                     child: ListView(
                       padding: const EdgeInsets.all(20),
@@ -188,7 +176,6 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                         const SizedBox(height: 14),
                         _buildPostBody(),
 
-                        // Post media
                         if ((_post!['media'] as List?)?.isNotEmpty == true) ...[
                           const SizedBox(height: 12),
                           ClipRRect(
@@ -227,7 +214,6 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
 
                         const SizedBox(height: 24),
 
-                        // Like row
                         Row(children: [
                           GestureDetector(
                             onTap: _toggleLike,
@@ -276,14 +262,10 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                     ),
                   ),
 
-                  // ── Comment input bar ──────────────────────────────────────
-                  // Slides up with keyboard, clears system nav bar when closed.
                   AnimatedPadding(
                     duration: const Duration(milliseconds: 150),
                     curve: Curves.easeOut,
                     padding: EdgeInsets.only(
-                      // When keyboard is visible, push bar up by keyboard height.
-                      // When keyboard is gone, leave room for the system nav bar.
                       bottom: keyboardHeight > 0 ? keyboardHeight : navBarHeight,
                     ),
                     child: Container(
@@ -293,7 +275,6 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                       ),
                       padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
                       child: Column(mainAxisSize: MainAxisSize.min, children: [
-                        // Media preview strip
                         if (_commentMedia.isNotEmpty) ...[
                           MediaPickerBar.buildPreview(_commentMedia, (i) {
                             setState(() => _commentMedia.removeAt(i));
@@ -338,12 +319,10 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
 
                           const SizedBox(width: 8),
 
-                          // Send — active when there is text OR media attached
                           ValueListenableBuilder<TextEditingValue>(
                             valueListenable: _commentCtrl,
                             builder: (_, val, __) {
-                              final canSend =
-                                  val.text.trim().isNotEmpty ||
+                              final canSend = val.text.trim().isNotEmpty ||
                                   _commentMedia.isNotEmpty;
                               return GestureDetector(
                                 onTap: canSend ? _submitComment : null,
@@ -363,13 +342,10 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                                       ? const Padding(
                                           padding: EdgeInsets.all(10),
                                           child: CircularProgressIndicator(
-                                              strokeWidth: 2,
-                                              color: Colors.black),
+                                              strokeWidth: 2, color: Colors.black),
                                         )
                                       : Icon(Icons.send_rounded,
-                                          color: canSend
-                                              ? Colors.black
-                                              : AppTheme.textMuted,
+                                          color: canSend ? Colors.black : AppTheme.textMuted,
                                           size: 18),
                                 ),
                               );
@@ -386,9 +362,13 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   Widget _buildPostHeader() {
     final username  = _post!['creator_username']?.toString() ?? '';
     final fullName  = _post!['creator_full_name']?.toString() ?? '';
-    final createdAt = _post!['post']?['created_at']?.toString() ?? '';
+    // ShowPostRepository returns fields flat — no nested 'post' key
+    final createdAt = _post!['created_at']?.toString() ?? '';
+    // ── avatar from ShowPostRepository ───────────────────────────────────
+    final avatarUrl = _post!['creator_avatar_url']?.toString();
+
     return Row(children: [
-      UserAvatar(username: username, size: 44),
+      UserAvatar(username: username, size: 44, avatarUrl: avatarUrl),
       const SizedBox(width: 12),
       Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(fullName.isNotEmpty ? fullName : username,
@@ -409,8 +389,9 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   }
 
   Widget _buildPostBody() {
-    final title   = _post!['post']?['title']?.toString() ?? '';
-    final content = _post!['post']?['content']?.toString() ?? '';
+    // ShowPostRepository returns fields flat — no nested 'post' key
+    final title   = _post!['title']?.toString() ?? '';
+    final content = _post!['content']?.toString() ?? '';
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       if (title.isNotEmpty)
         Text(title,
@@ -424,8 +405,6 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     ]);
   }
 }
-
-// ── Comment tile ───────────────────────────────────────────────────────────────
 
 class _CommentTile extends StatelessWidget {
   final Map<String, dynamic> comment;
@@ -445,9 +424,7 @@ class _CommentTile extends StatelessWidget {
           Row(children: [
             Text(comment['username']?.toString() ?? '',
                 style: AppTheme.label(
-                    color: AppTheme.textPrimary,
-                    size: 13,
-                    weight: FontWeight.w600)),
+                    color: AppTheme.textPrimary, size: 13, weight: FontWeight.w600)),
             const SizedBox(width: 8),
             Text(comment['createdAt']?.toString() ?? '',
                 style: AppTheme.label(color: AppTheme.textMuted, size: 11)),
@@ -466,12 +443,9 @@ class _CommentTile extends StatelessWidget {
               border: Border.all(color: AppTheme.border),
             ),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              // Show text only when non-empty (media-only comments have no text)
               if (content.isNotEmpty)
                 Text(content,
-                    style: AppTheme.label(
-                        color: AppTheme.textSecondary, size: 13)),
-              // Show attached media
+                    style: AppTheme.label(color: AppTheme.textSecondary, size: 13)),
               if (media.isNotEmpty) ...[
                 if (content.isNotEmpty) const SizedBox(height: 8),
                 ClipRRect(
@@ -493,10 +467,8 @@ class _CommentMediaBtn extends StatelessWidget {
   final bool     enabled;
   final VoidCallback onTap;
   const _CommentMediaBtn({
-    required this.icon,
-    required this.color,
-    required this.enabled,
-    required this.onTap,
+    required this.icon, required this.color,
+    required this.enabled, required this.onTap,
   });
 
   @override
@@ -512,8 +484,7 @@ class _CommentMediaBtn extends StatelessWidget {
               color: enabled ? color.withOpacity(0.3) : AppTheme.border),
         ),
         alignment: Alignment.center,
-        child: Icon(icon,
-            color: enabled ? color : AppTheme.textMuted, size: 16),
+        child: Icon(icon, color: enabled ? color : AppTheme.textMuted, size: 16),
       ),
     );
   }

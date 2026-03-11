@@ -5,7 +5,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class ApiService {
-  static const String baseUrl = 'http://10.54.172.91:8000/api';
+  static const String baseUrl = 'http://10.54.172.88:8000/api';
 
   static String? _token;
 
