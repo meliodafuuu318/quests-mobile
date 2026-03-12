@@ -290,7 +290,7 @@ class UserAvatar extends StatelessWidget {
   /// Relative paths are prefixed with [_base] automatically.
   final String? avatarUrl;
 
-  static const String _base = 'http://10.54.172.88:8000';
+  static const String _base = 'http://192.168.10.252:8000';
 
   const UserAvatar({
     super.key,

@@ -5,7 +5,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class ApiService {
-  static const String baseUrl = 'http://10.54.172.88:8000/api';
+  static const String baseUrl = 'http://192.168.10.252:8000/api';
 
   static String? _token;
 
@@ -197,7 +197,18 @@ class ApiService {
   // ─── QUESTS ──────────────────────────────────────────────────────────────
   static Future<Map<String, dynamic>> joinQuest(String code)    => _post('/quest/join',         {'questCode': code});
   static Future<Map<String, dynamic>> completeQuest(String id)  => _post('/quest/complete',      {'questId': id});
-  static Future<Map<String, dynamic>> completeTask(String id)   => _post('/quest/task/complete', {'taskId': id});
+  static Future<Map<String, dynamic>> completeTask(String taskId, XFile proofFile) async {
+    final req = http.MultipartRequest('POST', Uri.parse('$baseUrl/quest/task/complete'));
+    req.headers.addAll(_authHeaders);
+    req.fields['taskId'] = taskId;
+    final file = File(proofFile.path);
+    final mime = proofFile.mimeType ?? _guessMime(proofFile.path);
+    req.files.add(await http.MultipartFile.fromPath(
+      'file', file.path, contentType: _parseMediaType(mime)));
+    final streamed = await req.send();
+    final res = await http.Response.fromStream(streamed);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
 
   /// Vote on a community task completion submission
   static Future<Map<String, dynamic>> verifyTask(String taskId) =>

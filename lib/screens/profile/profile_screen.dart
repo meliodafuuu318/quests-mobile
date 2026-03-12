@@ -1,6 +1,7 @@
 import '../auth/login_screen.dart';
 import '../feed/post_detail_screen.dart';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import '../../services/auth_provider.dart';
 import '../../services/api_service.dart';
@@ -180,6 +181,8 @@ class _ProfileScreenState extends State<ProfileScreen>
                       _QuestsTab(
                         quests: (_user!['quests'] as List? ?? [])
                             .cast<Map<String, dynamic>>(),
+                        isSelf: _isSelf,
+                        onRefresh: _load,
                       ),
                     ],
                   ),
@@ -336,7 +339,9 @@ class _PostsTab extends StatelessWidget {
 
 class _QuestsTab extends StatelessWidget {
   final List<Map<String, dynamic>> quests;
-  const _QuestsTab({required this.quests});
+  final bool isSelf;
+  final VoidCallback? onRefresh;
+  const _QuestsTab({required this.quests, this.isSelf = false, this.onRefresh});
 
   @override
   Widget build(BuildContext context) {
@@ -353,7 +358,11 @@ class _QuestsTab extends StatelessWidget {
     return ListView.builder(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 80),
       itemCount: quests.length,
-      itemBuilder: (_, i) => _QuestCard(quest: quests[i]),
+      itemBuilder: (_, i) => _QuestCard(
+        quest: quests[i],
+        isSelf: isSelf,
+        onRefresh: onRefresh,
+      ),
     );
   }
 }
@@ -362,7 +371,9 @@ class _QuestsTab extends StatelessWidget {
 
 class _QuestCard extends StatefulWidget {
   final Map<String, dynamic> quest;
-  const _QuestCard({required this.quest});
+  final bool isSelf;
+  final VoidCallback? onRefresh;
+  const _QuestCard({required this.quest, this.isSelf = false, this.onRefresh});
 
   @override
   State<_QuestCard> createState() => _QuestCardState();
@@ -370,6 +381,7 @@ class _QuestCard extends StatefulWidget {
 
 class _QuestCardState extends State<_QuestCard> {
   bool _expanded = false;
+  String? _submittingTaskId; // ID of the task currently being submitted
 
   Color _statusColor(String? s) {
     switch (s) {
@@ -398,6 +410,39 @@ class _QuestCardState extends State<_QuestCard> {
       case 'submitted':        return 'SUBMITTED';
       case 'flagged':          return 'FLAGGED';
       default:                 return 'PENDING';
+    }
+  }
+
+  Future<void> _submitTask(String taskId) async {
+    final picker = ImagePicker();
+    final file   = await picker.pickImage(source: ImageSource.gallery);
+    if (file == null || !mounted) return;
+
+    setState(() => _submittingTaskId = taskId);
+    try {
+      final res = await ApiService.completeTask(taskId, file);
+      if (!mounted) return;
+      final ok = res['error'] == false;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(ok
+            ? 'Submission sent! Awaiting community verification.'
+            : res['message'] ?? 'Submission failed'),
+        backgroundColor: ok ? AppTheme.cyan : AppTheme.rose,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      ));
+      if (ok) widget.onRefresh?.call();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: const Text('Something went wrong. Please try again.'),
+          backgroundColor: AppTheme.rose,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        ));
+      }
+    } finally {
+      if (mounted) setState(() => _submittingTaskId = null);
     }
   }
 
@@ -544,75 +589,119 @@ class _QuestCardState extends State<_QuestCard> {
                   style: AppTheme.mono(color: AppTheme.textMuted, size: 10)),
               const SizedBox(height: 10),
               ...tasks.map((task) {
-                final status = task['completion_status']?.toString();
-                final color  = _statusColor(status);
-                final icon   = _statusIcon(status);
-                final label  = _statusLabel(status);
+                final status   = task['completion_status']?.toString();
+                final taskId   = task['id']?.toString() ?? '';
+                final color    = _statusColor(status);
+                final icon     = _statusIcon(status);
+                final label    = _statusLabel(status);
+                final isPending = status == null || status.isEmpty;
+                final isLoading = _submittingTaskId == taskId;
 
                 return Padding(
                   padding: const EdgeInsets.only(bottom: 10),
-                  child: Row(
+                  child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Order badge
-                      Container(
-                        width: 22, height: 22,
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          color: AppTheme.surfaceElevated,
-                          borderRadius: BorderRadius.circular(5),
-                          border: Border.all(color: AppTheme.border),
-                        ),
-                        child: Text('${task['order']}',
-                            style: AppTheme.label(
-                                color: AppTheme.textMuted, size: 10)),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(task['title']?.toString() ?? '',
-                                style: AppTheme.label(
-                                    color: AppTheme.textPrimary,
-                                    size: 13,
-                                    weight: FontWeight.w600)),
-                            if ((task['description'] ?? '').toString().isNotEmpty)
-                              Text(
-                                task['description'].toString(),
-                                style: AppTheme.label(
-                                    color: AppTheme.textSecondary, size: 12),
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            const SizedBox(height: 4),
-                            Row(children: [
-                              Icon(icon, color: color, size: 12),
-                              const SizedBox(width: 4),
-                              Text(label,
-                                  style: AppTheme.label(color: color, size: 10)),
-                              if (task['approved_at'] != null) ...[
-                                const SizedBox(width: 8),
-                                Text(
-                                  '· ${_formatDate(task['approved_at'].toString())}',
-                                  style: AppTheme.label(
-                                      color: AppTheme.textMuted, size: 10),
-                                ),
-                              ],
-                            ]),
-                          ],
-                        ),
-                      ),
-                      // Reward column
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.end,
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('+${task['reward_exp']} EXP',
-                              style: AppTheme.label(color: AppTheme.gold, size: 10)),
-                          Text('+${task['reward_points']} PTS',
-                              style: AppTheme.label(color: AppTheme.violet, size: 10)),
+                          // Order badge
+                          Container(
+                            width: 22, height: 22,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: AppTheme.surfaceElevated,
+                              borderRadius: BorderRadius.circular(5),
+                              border: Border.all(color: AppTheme.border),
+                            ),
+                            child: Text('${task['order']}',
+                                style: AppTheme.label(
+                                    color: AppTheme.textMuted, size: 10)),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(task['title']?.toString() ?? '',
+                                    style: AppTheme.label(
+                                        color: AppTheme.textPrimary,
+                                        size: 13,
+                                        weight: FontWeight.w600)),
+                                if ((task['description'] ?? '').toString().isNotEmpty)
+                                  Text(
+                                    task['description'].toString(),
+                                    style: AppTheme.label(
+                                        color: AppTheme.textSecondary, size: 12),
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                const SizedBox(height: 4),
+                                Row(children: [
+                                  Icon(icon, color: color, size: 12),
+                                  const SizedBox(width: 4),
+                                  Text(label,
+                                      style: AppTheme.label(color: color, size: 10)),
+                                  if (task['approved_at'] != null) ...[
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      '· ${_formatDate(task['approved_at'].toString())}',
+                                      style: AppTheme.label(
+                                          color: AppTheme.textMuted, size: 10),
+                                    ),
+                                  ],
+                                ]),
+                              ],
+                            ),
+                          ),
+                          // Reward column
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              Text('+${task['reward_exp']} EXP',
+                                  style: AppTheme.label(color: AppTheme.gold, size: 10)),
+                              Text('+${task['reward_points']} PTS',
+                                  style: AppTheme.label(color: AppTheme.violet, size: 10)),
+                            ],
+                          ),
                         ],
                       ),
+                      // Submit button — only shown for own profile + pending tasks
+                      if (widget.isSelf && isPending) ...[
+                        const SizedBox(height: 8),
+                        GestureDetector(
+                          onTap: isLoading ? null : () => _submitTask(taskId),
+                          child: Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            decoration: BoxDecoration(
+                              color: AppTheme.gold.withOpacity(0.10),
+                              borderRadius: BorderRadius.circular(7),
+                              border: Border.all(color: AppTheme.gold.withOpacity(0.35)),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                if (isLoading)
+                                  const SizedBox(
+                                    width: 12, height: 12,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 1.5,
+                                        color: AppTheme.gold),
+                                  )
+                                else
+                                  const Icon(Icons.upload_outlined,
+                                      color: AppTheme.gold, size: 13),
+                                const SizedBox(width: 6),
+                                Text(
+                                  isLoading ? 'UPLOADING...' : 'SUBMIT PROOF',
+                                  style: AppTheme.mono(color: AppTheme.gold, size: 10),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 );

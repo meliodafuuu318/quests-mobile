@@ -486,7 +486,11 @@ class _CommentTileState extends State<_CommentTile> {
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        UserAvatar(username: widget.comment['username']?.toString() ?? 'u', size: 32),
+        UserAvatar(
+          username:  widget.comment['username']?.toString() ?? 'u',
+          avatarUrl: widget.comment['avatar_url']?.toString(),
+          size: 32,
+        ),
         const SizedBox(width: 10),
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
@@ -604,7 +608,11 @@ class _CommentTileState extends State<_CommentTile> {
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
             child: Row(children: [
-              UserAvatar(username: username, size: 28),
+              UserAvatar(
+                username:  username,
+                avatarUrl: widget.comment['avatar_url']?.toString(),
+                size: 28,
+              ),
               const SizedBox(width: 8),
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text(username,

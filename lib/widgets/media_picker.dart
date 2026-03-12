@@ -141,7 +141,7 @@ class MediaGallery extends StatelessWidget {
   const MediaGallery({
     super.key,
     required this.media,
-    this.baseUrl = 'http://10.54.172.88:8000',
+    this.baseUrl = 'http://192.168.10.252:8000',
   });
 
   @override
