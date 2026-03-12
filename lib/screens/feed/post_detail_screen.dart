@@ -488,7 +488,7 @@ class _CommentTileState extends State<_CommentTile> {
       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
         UserAvatar(
           username:  widget.comment['username']?.toString() ?? 'u',
-          avatarUrl: widget.comment['avatar_url']?.toString(),
+          avatarUrl: widget.comment['comment_avatar_url']?.toString(),
           size: 32,
         ),
         const SizedBox(width: 10),
@@ -610,7 +610,7 @@ class _CommentTileState extends State<_CommentTile> {
             child: Row(children: [
               UserAvatar(
                 username:  username,
-                avatarUrl: widget.comment['avatar_url']?.toString(),
+                avatarUrl: widget.comment['comment_avatar_url']?.toString(),
                 size: 28,
               ),
               const SizedBox(width: 8),
